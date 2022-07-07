@@ -159,6 +159,7 @@ Based on WebSockets extension (https://github.com/bigskysoftware/htmx/blob/maste
 
 			hubConnection.on(subscription, function handler(response) {
 				if (maybeCloseHubConnectionSource(hubElement)) {
+					hubConnection.off(subscription, handler)
 					return;
 				}
 
@@ -250,8 +251,8 @@ Based on WebSockets extension (https://github.com/bigskysoftware/htmx/blob/maste
 	}
 
 	/**
-	 * maybeStopListeningForMethod checks to the if the element that created the subscription to method
-	 * still exists in the DOM.  If NOT, then the HubConnection is closed and this function
+	 * maybeUnsubscribe checks if the element that created the subscription to method
+	 * still has matching subscription attribute. If NOT, then the subscription is removed and this function
 	 * returns TRUE.  If the element DOES EXIST, then no action is taken, and this function
 	 * returns FALSE.
 	 *
@@ -263,7 +264,7 @@ Based on WebSockets extension (https://github.com/bigskysoftware/htmx/blob/maste
 			api.getInternalData(hubElement).HubConnection.off(subscription, handler);
 			return true;
 		}
-		if (api.getAttributeValue(elt, signalRSubscribe).indexOf(subscription) == -1) {
+		if (api.getAttributeValue(elt, signalRSubscribe).split(",").indexOf(subscription) == -1) {
 			api.getInternalData(hubElement).HubConnection.off(subscription, handler);
 			return true;
 		}
