@@ -10,6 +10,10 @@ Based on WebSockets extension (https://github.com/bigskysoftware/htmx/blob/maste
 	/** @type {import("../htmx").HtmxInternalApi} */
 	var api;
 
+	var signalRConnect = "signalr-connect";
+	var signalRSubscribe = "signalr-subscribe";
+	var signalRSend = "signalr-send";
+
 	htmx.defineExtension("signalr", {
 
 		/**
@@ -51,22 +55,18 @@ Based on WebSockets extension (https://github.com/bigskysoftware/htmx/blob/maste
 				case "htmx:afterProcessNode":
 					var parent = evt.target;
 
-					forEach(queryAttributeOnThisOrChildren(parent, "signalr-hub"), function (child) {
+					forEach(queryAttributeOnThisOrChildren(parent, signalRConnect), function (child) {
 						ensureHubConnection(child)
 					});
-					forEach(queryAttributeOnThisOrChildren(parent, "signalr-method"), function (child) {
-						ensureMethodHandler(child)
+					forEach(queryAttributeOnThisOrChildren(parent, signalRSubscribe), function (child) {
+						ensureSubscription(child)
 					});
-					forEach(queryAttributeOnThisOrChildren(parent, "signalr-send"), function (child) {
-						ensureMethodHandler(child)
+					forEach(queryAttributeOnThisOrChildren(parent, signalRSend), function (child) {
+						ensureSending(child)
 					});
 			}
 		}
 	});
-
-	function splitOnWhitespace(trigger) {
-		return trigger.trim().split(/\s+/);
-	}
 
 	/**
 	 * ensureHubConnection creates a new SignalR Hub Connection on the designated element, using
@@ -87,16 +87,11 @@ Based on WebSockets extension (https://github.com/bigskysoftware/htmx/blob/maste
 		}
 
 		// Get the source straight from the element's value
-		var signalrHubUrl = api.getAttributeValue(elt, "signalr-hub")
+		var signalrHubUrl = api.getAttributeValue(elt, signalRConnect)
 
 		// Create a new HubConnection and event handlers
 		/** @type {HubConnection} */
 		var hubConnection = htmx.createHubConnection(signalrHubUrl);
-
-		// Re-connect any signalr-send commands as well.
-		forEach(queryAttributeOnThisOrChildren(elt, "signalr-send"), function (child) {
-			processHubConnectionSend(elt, child);
-		});
 
 		hubConnection.start();
 
@@ -127,8 +122,7 @@ Based on WebSockets extension (https://github.com/bigskysoftware/htmx/blob/maste
 			return;
 		}
 
-		var hubConnection = api.getInternalData(hubElement).HubConnection;
-		processHubConnectionSend(elt, child);
+		processHubConnectionSend(hubElement, elt);
 	}
 
 	/**
@@ -137,7 +131,7 @@ Based on WebSockets extension (https://github.com/bigskysoftware/htmx/blob/maste
 	 * @param {HTMLElement} elt
 	 * @returns
 	 */
-	function ensureMethodHandler(elt) {
+	function ensureSubscription(elt) {
 
 		// If the element containing the connection no longer exists, then
 		// do not subscribe
@@ -157,60 +151,85 @@ Based on WebSockets extension (https://github.com/bigskysoftware/htmx/blob/maste
 
 		var hubConnection = api.getInternalData(hubElement).HubConnection;
 
-		var signalrMethod = api.getAttributeValue(elt, "signalr-method");
-		hubConnection.on(signalrMethod, function handler(response) {
-			if (maybeCloseHubConnectionSource(hubElement)) {
-				return;
-			}
+		var signalrSubscribeAttribute = api.getAttributeValue(elt, signalRSubscribe);
+		var signalrSubscriptionNames = signalrSubscribeAttribute.split(",");
 
-			if (maybeStopListeningForMethod(hubElement, elt, handler)) {
-				return;
-			}
+		for (let i = 0; i < signalrSubscriptionNames.length; i++) {
+			var subscription = signalrSubscriptionNames[i].trim();
 
-			api.withExtensions(elt, function (extension) {
-				response = extension.transformResponse(response, null, elt);
-			});
-
-			var settleInfo = api.makeSettleInfo(elt);
-			var fragment = api.makeFragment(response);
-
-			if (fragment.children.length) {
-				for (var i = 0; i < fragment.children.length; i++) {
-					api.oobSwap(api.getAttributeValue(fragment.children[i], "hx-swap-oob") || "true", fragment.children[i], settleInfo);
+			hubConnection.on(subscription, function handler(response) {
+				if (maybeCloseHubConnectionSource(hubElement)) {
+					return;
 				}
-			}
 
-			api.settleImmediately(settleInfo.tasks);
-		});
+				if (maybeUnsubscribe(hubElement, subscription, elt, handler)) {
+					return;
+				}
+
+				// Other parts of htmx expect to have response object as a string
+				// So, we serialize it
+				if (typeof (response) === "object") {
+					response = JSON.stringify(response);
+				}
+
+				api.withExtensions(elt, function (extension) {
+					response = extension.transformResponse(response, null, elt);
+				});
+
+				var target = api.getTarget(elt);
+				var swapSpec = api.getSwapSpecification(elt);
+				var settleInfo = api.makeSettleInfo(elt);
+
+				api.selectAndSwap(swapSpec.swapStyle, target, elt, response, settleInfo);
+				settleInfo.elts.forEach(function (elt) {
+					if (elt.classList) {
+						elt.classList.add(htmx.config.settlingClass);
+					}
+					api.triggerEvent(elt, 'htmx:beforeSettle');
+				});
+
+				// Handle settle tasks (with delay if requested)
+				if (swapSpec.settleDelay > 0) {
+					setTimeout(doSettle(settleInfo), swapSpec.settleDelay);
+				} else {
+					doSettle(settleInfo)();
+				}
+			});
+		}
 	}
 
 	/**
 	 * processHubConnectionSend adds event listeners to the <form> element so that
 	 * messages can be sent to the HubConnection server when the form is submitted.
-	 * @param {HTMLElement} parent
-	 * @param {HTMLElement} child
+	 * @param {HTMLElement} hubElt
+	 * @param {HTMLElement} sendElt
 	 */
-	function processHubConnectionSend(parent, child) {
-		child.addEventListener(api.getTriggerSpecs(child)[0].trigger, function (evt) {
-			var HubConnection = api.getInternalData(parent).HubConnection;
-			var method = api.getAttributeValue(child, "signalr-send");
-			var headers = api.getHeaders(child, parent);
-			var results = api.getInputValues(child, 'post');
-			var errors = results.errors;
-			var rawParameters = results.values;
-			var expressionVars = api.getExpressionVars(child);
-			var allParameters = api.mergeObjects(rawParameters, expressionVars);
-			var filteredParameters = api.filterValues(allParameters, child);
-			filteredParameters['HEADERS'] = headers;
-			if (errors && errors.length > 0) {
-				api.triggerEvent(child, 'htmx:validation:halted', errors);
-				return;
-			}
-			HubConnection.send(method, filteredParameters);
-			if (api.shouldCancel(evt, child)) {
-				evt.preventDefault();
-			}
-		});
+	function processHubConnectionSend(hubElt, sendElt) {
+		var nodeData = api.getInternalData(sendElt);
+		var triggerSpecs = api.getTriggerSpecs(sendElt);
+		triggerSpecs.forEach(function (ts) {
+			api.addTriggerHandler(sendElt, ts, nodeData, function (elt, evt) {
+				var HubConnection = api.getInternalData(hubElt).HubConnection;
+				var method = api.getAttributeValue(sendElt, signalRSend);
+				var headers = api.getHeaders(sendElt, hubElt);
+				var results = api.getInputValues(sendElt, 'post');
+				var errors = results.errors;
+				var rawParameters = results.values;
+				var expressionVars = api.getExpressionVars(sendElt);
+				var allParameters = api.mergeObjects(rawParameters, expressionVars);
+				var filteredParameters = api.filterValues(allParameters, sendElt);
+				filteredParameters['HEADERS'] = headers;
+				if (errors && errors.length > 0) {
+					api.triggerEvent(sendElt, 'htmx:validation:halted', errors);
+					return;
+				}
+				HubConnection.send(method, filteredParameters);
+				if (api.shouldCancel(evt, sendElt)) {
+					evt.preventDefault();
+				}
+
+			});
+		})
 	}
 
 	/**
@@ -239,9 +258,13 @@ Based on WebSockets extension (https://github.com/bigskysoftware/htmx/blob/maste
 	 * @param {*} elt
 	 * @returns
 	 */
-	function maybeStopListeningForMethod(hubElement, elt, handler) {
+	function maybeUnsubscribe(hubElement, subscription, elt, handler) {
 		if (!api.bodyContains(elt)) {
-			api.getInternalData(hubElement).HubConnection.off(api.getAttributeValue(elt, "signalr-method"), handler);
+			api.getInternalData(hubElement).HubConnection.off(subscription, handler);
+			return true;
+		}
+		if (api.getAttributeValue(elt, signalRSubscribe).indexOf(subscription) == -1) {
+			api.getInternalData(hubElement).HubConnection.off(subscription, handler);
 			return true;
 		}
 		return false;
@@ -290,12 +313,13 @@ Based on WebSockets extension (https://github.com/bigskysoftware/htmx/blob/maste
 	 * @param {HTMLElement} elt
 	 */
 	function findParentWithHubConnection(elt) {
+		var match = api.getClosestMatch(elt, hasHubConnection);
+		return match;
+	}
 
-		while (!api.getAttributeValue(elt, "signalr-hub") && elt) {
-			elt = elt.parentNode;
-		}
-
-		return elt;
+	function hasHubConnection(node) {
+		var internalData = api.getInternalData(node);
+		return internalData.HubConnection != null;
 	}
 
 	/**
@@ -308,6 +332,29 @@ Based on WebSockets extension (https://github.com/bigskysoftware/htmx/blob/maste
 			for (var i = 0; i < arr.length; i++) {
 				func(arr[i]);
 			}
+		}
+	}
+
+	/**
+	 * doSettle mirrors much of the functionality in htmx that
+	 * settles elements after their content has been swapped.
+	 * TODO: this should be published by htmx, and not duplicated here
+	 * @param {import("../htmx").HtmxSettleInfo} settleInfo
+	 * @returns () => void
+	 */
+	 function doSettle(settleInfo) {
+
+		return function() {
+			settleInfo.tasks.forEach(function (task) {
+				task.call();
+			});
+
+			settleInfo.elts.forEach(function (elt) {
+				if (elt.classList) {
+					elt.classList.remove(htmx.config.settlingClass);
+				}
+				api.triggerEvent(elt, 'htmx:afterSettle');
+			});
 		}
 	}
 
