@@ -101,3 +101,5 @@ This library is licensed under the terms of [MIT License](LICENSE)
 
 The implementation is based on the official [SSE](https://github.com/bigskysoftware/htmx/blob/master/src/ext/sse.js) and [WebSockets](https://github.com/bigskysoftware/htmx/blob/master/src/ext/ws.js)
 extensions from [htmx](https://github.com/bigskysoftware/htmx) by Big Sky Software, which are licensed under the terms of [BSD 2-Clause "Simplified" License](https://github.com/bigskysoftware/htmx/blob/master/LICENSE).
+
+See more in [COPYRIGHT_NOTICE](COPYRIGHT_NOTICE.md) file
