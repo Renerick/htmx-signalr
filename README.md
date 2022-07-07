@@ -1,5 +1,8 @@
 # htmx-signal
 
+> ⚠ Warning: This extension relies on features from htmx>=v1.8.0 and WILL BREAK on older versions.
+> As of July, 7, that means that you would have to use htmx from `dev` branch
+
 The SignalR extension allows to connect and interact with SignalR server directly from html.
 It establishes connection to the hub, subscribes to the events, allows to send messages to the server,
 processes incoming messages and swaps the content into your htmx page.  In a way, it combines features from SSE
