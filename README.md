@@ -1,4 +1,4 @@
-# htmx-signal
+# htmx-signalr
 
 > ⚠ Warning: This extension relies on features from htmx>=v1.8.0 and WILL BREAK on older versions.
 > As of July, 7, that means that you would have to use htmx from `dev` branch
@@ -18,7 +18,7 @@ Install the extension by including the script into your page, as well as SignalR
 
 ```html
 <script src="https://unpkg.com/@microsoft/signalr@next/dist/browser/signalr.js"></script>
-<script src="/js/hx-signal.js"></script>
+<script src="/js/hx-signalr.js"></script>
 ```
 
 Activate the extension by adding `hx-ext` attribute to your page
@@ -27,7 +27,7 @@ Activate the extension by adding `hx-ext` attribute to your page
 <div hx-ext="signalr">...</div>
 ```
 
-The extension provides three attributes, which are similar to [SSE extension](https://htmx.org/extensions/server-sent-events/)
+The extension provides three attributes to create and interact with the connection.
 
 ### `signalr-connect`
 
@@ -39,7 +39,7 @@ The extension provides three attributes, which are similar to [SSE extension](ht
 
 Other attributes will use the connection from the first parent in page structure.
 
-### `signal-send`
+### `signalr-send`
 
 `signalr-send` attribute is used to send messages via SignalR connection. The data is serialized in an object, where fields are mapped from input elements
 and values from `hx-include`, `hx-vals`, etc. Additionally, [request headers](https://htmx.org/docs/#request-headers) are attached in `HEADERS` property.
