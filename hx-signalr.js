@@ -2,7 +2,9 @@
 SignalR Extension
 ============================
 This extension adds support for SignalR to htmx.
-Based on WebSockets extension (https://github.com/bigskysoftware/htmx/blob/master/src/ext/ws.js) by bigskysoftware.
+Based on WebSockets extension (https://github.com/bigskysoftware/htmx/blob/master/src/ext/ws.js)
+and SSE extension (https://github.com/bigskysoftware/htmx/blob/master/src/ext/sse.js)
+by bigskysoftware.
 */
 
 (function () {
