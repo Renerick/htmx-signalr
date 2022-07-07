@@ -1,9 +1,10 @@
 # htmx-signal
 
 The SignalR extension allows to connect and interact with SignalR server directly from html.
-It establishes connection to the hub, subscribes to the events, processes incoming messages and swaps the content into your htmx page.
-In a way, it combines features from SSE and WebSockets extensions, allowing for bi-direction browser-server communication and supporting
-"channels" to distinguish messages between each other.
+It establishes connection to the hub, subscribes to the events, allows to send messages to the server,
+processes incoming messages and swaps the content into your htmx page.  In a way, it combines features from SSE
+and WebSockets extensions, allowing for bi-directional browser-server communication and supporting
+"channels" ("methods" in SignalR terminology) to distinguish messages between each other.
 
 [SignalR](https://docs.microsoft.com/en-us/aspnet/core/signalr/introduction?view=aspnetcore-6.0) is an open-source library that
 simplifies adding real-time web functionality to apps. Real-time web functionality enables server-side code to push content to clients instantly.
@@ -38,12 +39,12 @@ Other attributes will use the connection from the first parent in page structure
 ### `signal-send`
 
 `signalr-send` attribute is used to send messages via SignalR connection. The data is serialized in an object, where fields are mapped from input elements
-and other values from `hx-include`, `hx-vals` etc. Additionally, [request headers](https://htmx.org/docs/#request-headers) are attached in `HEADERS` property.
+and values from `hx-include`, `hx-vals`, etc. Additionally, [request headers](https://htmx.org/docs/#request-headers) are attached in `HEADERS` property.
 
 ```html
 <form signalr-send="echo">
-<input type="text" name="message">
-<button type="submit">Submit</button>
+  <input type="text" name="message">
+  <button type="submit">Submit</button>
 </form>
 ```
 
@@ -71,7 +72,7 @@ public async Task Echo(EchoRequest request)
 
 ### `signalr-subscribe`
 
-`signalr-subscribe` attribute is used to declare client method and subscribe message handler for it. Received messages will be swapped into the page body.
+`signalr-subscribe` attribute is used to declare client method and attach message handler to it. Received messages will be swapped into the page body.
 The default target is `innerHTML` of the element with that attribute. The target and swapping method can be changed with `hx-target` and `hx-swap` attributes. If the message
 contains OOB elements, they will also be processed as usual.
 
