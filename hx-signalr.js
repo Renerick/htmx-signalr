@@ -154,36 +154,45 @@ by bigskysoftware.
 		var hubConnection = api.getInternalData(hubElement).HubConnection;
 
 		var signalrSubscribeAttribute = api.getAttributeValue(elt, signalRSubscribe);
-		var signalrSubscriptionNames = signalrSubscribeAttribute.split(",");
+		var signalrMethodNames = signalrSubscribeAttribute.split(",");
 
-		for (let i = 0; i < signalrSubscriptionNames.length; i++) {
-			var subscription = signalrSubscriptionNames[i].trim();
+		for (let i = 0; i < signalrMethodNames.length; i++) {
+			var method = signalrMethodNames[i].trim();
 
-			hubConnection.on(subscription, function handler(response) {
+			hubConnection.on(method, function handler(message) {
 				if (maybeCloseHubConnectionSource(hubElement)) {
-					hubConnection.off(subscription, handler)
+					hubConnection.off(method, handler)
 					return;
 				}
 
-				if (maybeUnsubscribe(hubElement, subscription, elt, handler)) {
+				if (maybeUnsubscribe(hubElement, method, elt, handler)) {
+					return;
+				}
+
+				var target = api.getTarget(elt);
+				var settleInfo = api.makeSettleInfo(elt);
+
+				var messageSpec = {
+					message: message,
+					method: method,
+					target: target,
+				};
+				if (!api.triggerEvent(elt, 'htmx:signalr:message', messageSpec)) {
 					return;
 				}
 
 				// Other parts of htmx expect to have response object as a string
 				// So, we serialize it
-				if (typeof (response) === "object") {
-					response = JSON.stringify(response);
+				if (typeof (messageSpec.message) === "object") {
+					messageSpec.message = JSON.stringify(messageSpec.message);
 				}
 
 				api.withExtensions(elt, function (extension) {
-					response = extension.transformResponse(response, null, elt);
+					messageSpec.message = extension.transformResponse(messageSpec.message, null, elt);
 				});
 
-				var target = api.getTarget(elt);
 				var swapSpec = api.getSwapSpecification(elt);
-				var settleInfo = api.makeSettleInfo(elt);
-
-				api.selectAndSwap(swapSpec.swapStyle, target, elt, response, settleInfo);
+				api.selectAndSwap(swapSpec.swapStyle, messageSpec.target, elt, messageSpec.message, settleInfo);
 				settleInfo.elts.forEach(function (elt) {
 					if (elt.classList) {
 						elt.classList.add(htmx.config.settlingClass);
@@ -345,9 +354,9 @@ by bigskysoftware.
 	 * @param {import("../htmx").HtmxSettleInfo} settleInfo
 	 * @returns () => void
 	 */
-	 function doSettle(settleInfo) {
+	function doSettle(settleInfo) {
 
-		return function() {
+		return function () {
 			settleInfo.tasks.forEach(function (task) {
 				task.call();
 			});
