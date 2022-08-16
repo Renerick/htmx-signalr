@@ -235,10 +235,17 @@ by bigskysoftware.
 					api.triggerEvent(sendElt, 'htmx:validation:halted', errors);
 					return;
 				}
+
+				if (!api.triggerEvent(sendElt, 'htmx:signalr:beforeSend', { method: method, headers: headers, allParameters: allParameters, filteredParameters: filteredParameters })) {
+					return;
+				};
+
 				HubConnection.send(method, filteredParameters);
 				if (api.shouldCancel(evt, sendElt)) {
 					evt.preventDefault();
 				}
+
+				api.triggerEvent(sendElt, 'htmx:signalr:afterSend', { method: method, message: filteredParameters });
 
 			});
 		})

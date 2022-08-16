@@ -126,6 +126,26 @@ connection. `detail` property of the event has a few fields:
 
 Cancelling the event will prevent any further processing.
 
+#### `htmx:singnalr:beforeSend`
+
+This event is triggered just before sending a message. `detail` property contains the parameters of the message being sent, which can be modified by the event handler:
+
+- `method` contains the name of the method being called. Modifying this field will retarget the message to a different handler.
+- `headers` contains the headers, that will be attached into `HEADERS` field.
+- `allParameters` contains all parameters from the form inputs and `hx-vals` attributes.
+- `filteredParameters` contains all parameters after filtering is applied. The value from this field will be sent as-is.
+
+Cancelling the event will prevent sending.
+
+#### `htmx:singnalr:afterSend`
+
+This event is triggered just after message was sent. Modifying the data in `details` property has no effect.
+
+- `method` contains the name of the method that was called.
+- `message` contains the data that was sent to the hub.
+
+Cancelling this event has no effect.
+
 ## License
 
 This library is licensed under the terms of [MIT License](LICENSE)
