@@ -72,13 +72,17 @@ The form above will be sent as
 That message can be handled by the following hub method
 
 ```csharp
-public record EchoRequest(string message);
-
 public async Task Echo(EchoRequest request)
 {
   await Clients.Caller.SendAsync("echo", $@"<div id=""echo"">{request.message}</div><div hx-swap-oob=""true"" id=""echo-oob-data"">{new Random().Next()}</div>");
 }
+
+public record EchoRequest(string message);
 ```
+
+:exclamation::exclamation: Please note, that your request object **MUST** define its fields as strings. The reason for this is the fact that HTML inputs 
+have no distinction between numbers and strings values, but JSON has. Doing client-side conversion will inevitably cause many
+edge-cases and bugs. Server-side validation and mapping is much easier, although it does introduce a bit of a boilerplate.
 
 ### `signalr-subscribe`
 
