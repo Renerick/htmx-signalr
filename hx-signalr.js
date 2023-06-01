@@ -54,7 +54,7 @@ by bigskysoftware.
 					return;
 
 				// Try to create hub connections when elements are processed
-				case "htmx:afterProcessNode":
+				case "htmx:beforeProcessNode":
 					var parent = evt.target;
 
 					forEach(queryAttributeOnThisOrChildren(parent, signalRConnect), function (child) {
