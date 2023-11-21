@@ -25,7 +25,7 @@ public class HostedService : BackgroundService
                 new { name = "test", id = new Random().Next() },
                 cancellationToken: cancellationToken
             );
-            await Task.Delay(1000, cancellationToken);
+            await Task.Delay(5000, cancellationToken);
         }
     }
 }

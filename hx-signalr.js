@@ -73,14 +73,14 @@ by bigskysoftware.
 	/**
 	 * ensureHubConnection creates a new SignalR Hub Connection on the designated element, using
 	 * the element's "signalr-connect" attribute.
-	 * @param {HTMLElement} elt
+	 * @param {HTMLElement} hubElt
 	 * @returns
 	 */
-	function ensureHubConnection(elt) {
+	function ensureHubConnection(hubElt) {
 
 		// If the element containing the connection no longer exists, then
 		// do not connect/reconnect the Hub.
-		if (!api.bodyContains(elt)) {
+		if (!api.bodyContains(hubElt)) {
 			return;
 		}
 		if (!signalR) {
@@ -89,16 +89,25 @@ by bigskysoftware.
 		}
 
 		// Get the source straight from the element's value
-		var signalrHubUrl = api.getAttributeValue(elt, signalRConnect)
+		var signalrHubUrl = api.getAttributeValue(hubElt, signalRConnect)
 
 		// Create a new HubConnection and event handlers
 		/** @type {HubConnection} */
 		var hubConnection = htmx.createHubConnection(signalrHubUrl);
 
+		hubConnection.onreconnecting(function (error) {
+			api.triggerEvent(hubElt, 'htmx:signalr:reconnecting', { error: error });
+		});
+		hubConnection.onreconnected(function (connectionId) {
+			api.triggerEvent(hubElt, 'htmx:signalr:reconnected', { connectionId: connectionId });
+		});
+		hubConnection.onclose(function (error) {
+			api.triggerEvent(hubElt, 'htmx:signalr:close', { error: error });
+		});
 		hubConnection.start();
 
 		// Put the HubConnection into the HTML Element's custom data.
-		api.getInternalData(elt).HubConnection = hubConnection;
+		api.getInternalData(hubElt).HubConnection = hubConnection;
 	}
 
 	/**
