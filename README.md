@@ -184,7 +184,7 @@ control all aspects of the connection yourself.
 htmx.createHubConnection = function (url) {
   return new signalR.HubConnectionBuilder()
     .withUrl(url)
-    .withAutomaticReconnect()
+    .withAutomaticReconnect(Array(100).fill(5000))   // attempt up to 100 reconnections every 5 seconds
     .build()
 }
 ```
