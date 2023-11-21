@@ -1,6 +1,7 @@
 ## 2023-11-21
 
 * Exposed `onreconnecting`, `onreconnected` and `close` SignalR Hub events
+* Add example of using events above to display connection status in the UI
 
 # 2023-06-02
 

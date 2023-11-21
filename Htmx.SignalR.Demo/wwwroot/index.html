@@ -13,7 +13,10 @@
     </style>
 </head>
 <body>
-<div hx-ext="signalr,client-side-templates" signalr-connect="/testhub">
+<div id="signalr-indicator" style="display: none;">Connecting to the hub...</div>
+<div hx-ext="signalr,client-side-templates" signalr-connect="/testhub"
+     hx-on:htmx:signalr:reconnecting="htmx.find('#signalr-indicator').style.display='block'"
+     hx-on:htmx:signalr:reconnected="htmx.find('#signalr-indicator').style.display='none'">
     <div signalr-subscribe="counter">
         <div id="counter"></div>
     </div>

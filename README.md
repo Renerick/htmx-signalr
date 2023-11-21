@@ -165,6 +165,16 @@ These events are matching with corresponding SignalR event
 
 - `connectionId` contains id of SignalR connection object (if present)
 
+You can use those events to display connection status in the UI and/or gracefully handle connection loss.
+Here is basic example of showing reconnection status using [`hx-on`](https://htmx.org/attributes/hx-on/) attribute
+
+```html
+<div id="signalr-indicator" style="display: none;">Connecting to the hub...</div>
+<div hx-ext="signalr" signalr-connect="/hub"
+     hx-on:htmx:signalr:reconnecting="htmx.find('#signalr-indicator').style.display='block'"
+     hx-on:htmx:signalr:reconnected="htmx.find('#signalr-indicator').style.display='none'"></div>
+```
+
 ### `htmx.createHubConnection`
 
 Similar to WebSocket extension, it is possible to provide custom factory method for hub connection. This way you can
