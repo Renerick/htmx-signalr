@@ -6,15 +6,20 @@
           content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
     <meta http-equiv="X-UA-Compatible" content="ie=edge">
     <title>Test page</title>
-    <style>.htmx-settling {
+    <style>
+    .htmx-settling {
         background: pink;
-    }</style>
+    }
+    </style>
 </head>
 <body>
-<div hx-ext="signalr,client-side-templates" signalr-connect="/testhub">
-    <!--    <div signalr-subscribe="counter">-->
-    <!--        <div id="counter"></div>-->
-    <!--    </div>-->
+<div id="signalr-indicator" style="display: none;">Connecting to the hub...</div>
+<div hx-ext="signalr,client-side-templates" signalr-connect="/testhub"
+     hx-on:htmx:signalr:reconnecting="htmx.find('#signalr-indicator').style.display='block'"
+     hx-on:htmx:signalr:reconnected="htmx.find('#signalr-indicator').style.display='none'">
+    <div signalr-subscribe="counter">
+        <div id="counter"></div>
+    </div>
     <form signalr-send="echo">
         <input type="text" name="message">
         <button type="submit">Submit</button>
@@ -23,20 +28,18 @@
     </div>
     <h2>Echo target is below</h2>
     <div id="echo-target"></div>
-    <h2>Alt Echo target is below</h2>
-    <div id="alt-echo-target"></div>
     <h2>Echo oob data is below</h2>
     <div id="echo-oob-data"></div>
     <hr>
     <h2>Transform response test (Mustache client side tempaltes)</h2>
-    <!--    <div mustache-template="foo" signalr-subscribe="json">-->
-    <!--    </div>-->
+    <div mustache-template="foo" signalr-subscribe="json">
+    </div>
     <template id="foo">
         <div id="json">{{name}} - {{id}}</div>
     </template>
 </div>
 <script src="https://cdn.jsdelivr.net/gh/bigskysoftware/htmx@dev/src/htmx.js"></script>
-<script src="https://unpkg.com/@microsoft/signalr@next/dist/browser/signalr.js"></script>
+<script src="https://unpkg.com/@microsoft/signalr@8.0.0/dist/browser/signalr.js"></script>
 <script src="/hx-signalr.js"></script>
 <script src="https://unpkg.com/htmx.org/dist/ext/client-side-templates.js"></script>
 <script src="https://unpkg.com/mustache@latest"></script>

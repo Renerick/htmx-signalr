@@ -80,7 +80,7 @@ public async Task Echo(EchoRequest request)
 public record EchoRequest(string message);
 ```
 
-:exclamation::exclamation: Please note, that your request object **MUST** define its fields as strings. The reason for this is the fact that HTML inputs 
+:exclamation::exclamation: Please note, that your request object **MUST** define its fields as strings. The reason for this is the fact that HTML inputs
 have no distinction between numbers and strings values, but JSON has. Doing client-side conversion will inevitably cause many
 edge-cases and bugs. Server-side validation and mapping is much easier, although it does introduce a bit of a boilerplate.
 
@@ -149,6 +149,45 @@ This event is triggered just after message was sent. Modifying the data in `deta
 - `message` contains the data that was sent to the hub.
 
 Cancelling this event has no effect.
+
+#### `htmx:signalr:reconnecting`, `htmx:signalr:close`
+
+These events are matching with corresponding SignalR events
+[`onreconnecting`](https://learn.microsoft.com/en-us/javascript/api/%40microsoft/signalr/hubconnection?view=signalr-js-latest#@microsoft-signalr-hubconnection-onreconnecting),
+and [`onclose`](https://learn.microsoft.com/en-us/javascript/api/%40microsoft/signalr/hubconnection?view=signalr-js-latest#@microsoft-signalr-hubconnection-onclose).
+
+- `error` contains original SignalR error object (if present)
+
+#### `htmx:signalr:reconnected`
+
+These events are matching with corresponding SignalR event
+[`onreconnected`](https://learn.microsoft.com/en-us/javascript/api/%40microsoft/signalr/hubconnection?view=signalr-js-latest#@microsoft-signalr-hubconnection-onreconnected)
+
+- `connectionId` contains id of SignalR connection object (if present)
+
+You can use those events to display connection status in the UI and/or gracefully handle connection loss.
+Here is basic example of showing reconnection status using [`hx-on`](https://htmx.org/attributes/hx-on/) attribute
+
+```html
+<div id="signalr-indicator" style="display: none;">Connecting to the hub...</div>
+<div hx-ext="signalr" signalr-connect="/hub"
+     hx-on:htmx:signalr:reconnecting="htmx.find('#signalr-indicator').style.display='block'"
+     hx-on:htmx:signalr:reconnected="htmx.find('#signalr-indicator').style.display='none'"></div>
+```
+
+### `htmx.createHubConnection`
+
+Similar to WebSocket extension, it is possible to provide custom factory method for hub connection. This way you can
+control all aspects of the connection yourself.
+
+```js
+htmx.createHubConnection = function (url) {
+  return new signalR.HubConnectionBuilder()
+    .withUrl(url)
+    .withAutomaticReconnect(Array(100).fill(5000))   // attempt up to 100 reconnections every 5 seconds
+    .build()
+}
+```
 
 ## License
 
