@@ -40,13 +40,15 @@ by bigskysoftware.
 		 * @param {Event} evt
 		 */
 		onEvent: function (name, evt) {
-
+			
+			var parent = evt.target ?? evt.detail.elt;
+			
 			switch (name) {
 
 				// Try to remove hub connection when elements are removed
 				case "htmx:beforeCleanupElement":
 
-					var internalData = api.getInternalData(evt.target)
+					var internalData = api.getInternalData(parent)
 
 					if (internalData.HubConnection != undefined) {
 						internalData.HubConnection.stop();
@@ -55,7 +57,6 @@ by bigskysoftware.
 
 				// Try to create hub connections when elements are processed
 				case "htmx:beforeProcessNode":
-					var parent = evt.target;
 
 					forEach(queryAttributeOnThisOrChildren(parent, signalRConnect), function (child) {
 						ensureHubConnection(child)
