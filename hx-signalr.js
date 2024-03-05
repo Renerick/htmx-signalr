@@ -201,6 +201,10 @@ by bigskysoftware.
 					messageSpec.message = extension.transformResponse(messageSpec.message, null, elt);
 				});
 
+				if (messageSpec.message === null || messageSpec.message === undefined) {
+					return;
+				}
+
 				var swapSpec = api.getSwapSpecification(elt);
 				api.selectAndSwap(swapSpec.swapStyle, messageSpec.target, elt, messageSpec.message, settleInfo);
 				settleInfo.elts.forEach(function (elt) {
