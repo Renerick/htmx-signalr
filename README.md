@@ -116,7 +116,7 @@ events with JS or _hyperscript and handle each method programmatically.
 
 ### Events
 
-#### `htmx:singnalr:message`
+#### `htmx:signalr:message`
 
 This event is triggered on the elements with active method subscription when a message is received from the hub
 connection. `detail` property of the event has a few fields:
@@ -130,7 +130,7 @@ connection. `detail` property of the event has a few fields:
 
 Cancelling the event will prevent any further processing.
 
-#### `htmx:singnalr:beforeSend`
+#### `htmx:signalr:beforeSend`
 
 This event is triggered just before sending a message. `detail` property contains the parameters of the message being sent, which can be modified by the event handler:
 
@@ -141,7 +141,7 @@ This event is triggered just before sending a message. `detail` property contain
 
 Cancelling the event will prevent sending.
 
-#### `htmx:singnalr:afterSend`
+#### `htmx:signalr:afterSend`
 
 This event is triggered just after message was sent. Modifying the data in `details` property has no effect.
 
