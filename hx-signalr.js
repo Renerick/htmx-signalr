@@ -182,7 +182,6 @@ by bigskysoftware.
 				}
 
 				var target = api.getTarget(elt);
-				var settleInfo = api.makeSettleInfo(elt);
 
 				var messageSpec = {
 					message: message,
@@ -208,20 +207,7 @@ by bigskysoftware.
 				}
 
 				var swapSpec = api.getSwapSpecification(elt);
-				api.selectAndSwap(swapSpec.swapStyle, messageSpec.target, elt, messageSpec.message, settleInfo);
-				settleInfo.elts.forEach(function (elt) {
-					if (elt.classList) {
-						elt.classList.add(htmx.config.settlingClass);
-					}
-					api.triggerEvent(elt, 'htmx:beforeSettle');
-				});
-
-				// Handle settle tasks (with delay if requested)
-				if (swapSpec.settleDelay > 0) {
-					setTimeout(doSettle(settleInfo), swapSpec.settleDelay);
-				} else {
-					doSettle(settleInfo)();
-				}
+				api.swap(messageSpec.target, messageSpec.message, swapSpec);
 			});
 		}
 	}
@@ -369,28 +355,4 @@ by bigskysoftware.
 			}
 		}
 	}
-
-	/**
-	 * doSettle mirrors much of the functionality in htmx that
-	 * settles elements after their content has been swapped.
-	 * TODO: this should be published by htmx, and not duplicated here
-	 * @param {import("../htmx").HtmxSettleInfo} settleInfo
-	 * @returns () => void
-	 */
-	function doSettle(settleInfo) {
-
-		return function () {
-			settleInfo.tasks.forEach(function (task) {
-				task.call();
-			});
-
-			settleInfo.elts.forEach(function (elt) {
-				if (elt.classList) {
-					elt.classList.remove(htmx.config.settlingClass);
-				}
-				api.triggerEvent(elt, 'htmx:afterSettle');
-			});
-		}
-	}
-
 })();
