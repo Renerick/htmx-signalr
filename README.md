@@ -121,6 +121,14 @@ events with JS or _hyperscript and handle each method programmatically.
 
 ### Events
 
+#### `htmx:signalr:start`
+
+This event is triggered once connection with the hub has been established. This event is raised on `signalr-connect` element.
+
+- `connectionId` contains id of SignalR connection object (if present)
+
+Cancelling the event has no effect.
+
 #### `htmx:signalr:message`
 
 This event is triggered on the elements with active method subscription when a message is received from the hub

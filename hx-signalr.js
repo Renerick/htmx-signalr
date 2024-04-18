@@ -105,7 +105,9 @@ by bigskysoftware.
 		hubConnection.onclose(function (error) {
 			api.triggerEvent(hubElt, 'htmx:signalr:close', { error: error });
 		});
-		hubConnection.start();
+		hubConnection.start().then(function () {
+			api.triggerEvent(hubElt, 'htmx:signalr:start', { connectionId: hubConnection.connectionId })
+		});
 
 		// Put the HubConnection into the HTML Element's custom data.
 		api.getInternalData(hubElt).HubConnection = hubConnection;
