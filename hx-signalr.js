@@ -228,7 +228,7 @@ by bigskysoftware.
 				var headers = api.getHeaders(sendElt, hubElt);
 				var results = api.getInputValues(sendElt, 'post');
 				var errors = results.errors;
-				var rawParameters = results.values;
+				var rawParameters = Object.assign({}, results.values);
 				var expressionVars = api.getExpressionVars(sendElt);
 				var allParameters = api.mergeObjects(rawParameters, expressionVars);
 				var filteredParameters = api.filterValues(allParameters, sendElt);
