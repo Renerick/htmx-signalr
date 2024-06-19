@@ -1,8 +1,8 @@
 # htmx-signalr
 
 > [!TIP]
-> If you are using htmx 2.0, switch to `htmx-2.0` branch for updated version. Once htmx 2.0 is released, the branch
-> it will be merged to master, while htmx 1.0 compatible implementation will always be available in corresponding branch.
+> If you are using htmx 2.0, switch to `master` branch for latest version. htmx 1.0 compatible
+> implementation will always be available in corresponding branch.
 
 > [!WARNING]
 > htmx 1.0 implementation of the extension relies on features available in htmx>=v1.8.0 and WILL BREAK on older versions.
