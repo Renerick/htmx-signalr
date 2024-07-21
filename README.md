@@ -120,11 +120,27 @@ events with JS or _hyperscript and handle each method programmatically.
 
 ### Events
 
+#### `htmx:signalr:starting`
+
+This event is triggered at the beginning of SignalR initialization. This event is raised after creating SignalR instance
+and before setting up event listeners and calling `.start()`
+
+Cancelling the event has no effect.
+
 #### `htmx:signalr:start`
 
 This event is triggered once connection with the hub has been established. This event is raised on `signalr-connect` element.
 
 - `connectionId` contains id of SignalR connection object (if present)
+
+Cancelling the event has no effect.
+
+#### `htmx:signalr:start-error`
+
+This event is triggered if `start()` promise resolves with an error.
+
+- `message` contains `message` field from the error object.
+- `errorType` contains `errorType` field from the error object.
 
 Cancelling the event has no effect.
 
