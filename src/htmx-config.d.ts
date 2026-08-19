@@ -14,7 +14,7 @@ export interface HtmxSignalRConfig {
     logging?: LogLevel | string | ILogger | false;
     urlOptions?: IHttpConnectionOptions;
     automaticReconnect?: boolean | number[] | IRetryPolicy;
-    maxOutgoingMessagesQueueSize?: number;
+    maxOutgoingMessagesQueueSize: number;
     createHubConnection?: (
         url: string,
         element: Element,
@@ -24,7 +24,7 @@ export interface HtmxSignalRConfig {
 
 declare module 'htmx.org' {
     interface HtmxConfig {
-        signalr?: HtmxSignalRConfig;
+        signalr?: Partial<HtmxSignalRConfig>;
     }
 }
 
