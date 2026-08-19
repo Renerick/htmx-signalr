@@ -463,21 +463,21 @@ describe('hx-signalr extension', function () {
     it('emits a before connection event', function () {
       playground().innerHTML = '<div hx-signalr:connect="/test-hub"></div>'
       const element = playground().firstElementChild
-      let beforeConnection
+      let beforeDetail
       let beforeUrl
       let beforeAutomaticReconnect
       let beforeQueueSize
       element.addEventListener('htmx:signalr:before:connection', event => {
-        beforeConnection = event.detail.connection
-        beforeUrl = event.detail.connection.url
-        beforeAutomaticReconnect = event.detail.connection.config.automaticReconnect
-        beforeQueueSize = event.detail.connection.config.maxOutgoingMessagesQueueSize
+        beforeDetail = event.detail
+        beforeUrl = event.detail.url
+        beforeAutomaticReconnect = event.detail.config.automaticReconnect
+        beforeQueueSize = event.detail.config.maxOutgoingMessagesQueueSize
       })
 
       htmx.process(playground())
 
       assert.equal(beforeUrl, '/test-hub')
-      assert.hasAllKeys(beforeConnection, ['url', 'config', 'cancelled'])
+      assert.hasAllKeys(beforeDetail, ['url', 'config', 'cancelled'])
       assert.strictEqual(beforeAutomaticReconnect, true)
       assert.strictEqual(beforeQueueSize, 100)
     })
@@ -505,7 +505,7 @@ describe('hx-signalr extension', function () {
       const element = playground().firstElementChild
       let closeDetail
       element.addEventListener('htmx:signalr:before:connection', event => {
-        event.detail.connection.cancelled = true
+        event.detail.cancelled = true
       })
       element.addEventListener('htmx:signalr:close', event => { closeDetail = event.detail })
 
@@ -526,8 +526,8 @@ describe('hx-signalr extension', function () {
         return connection
       }
       element.addEventListener('htmx:signalr:before:connection', event => {
-        event.detail.connection.url = '/configured-hub'
-        event.detail.connection.config.automaticReconnect = false
+        event.detail.url = '/configured-hub'
+        event.detail.config.automaticReconnect = false
       })
 
       htmx.process(playground())
@@ -585,7 +585,7 @@ describe('hx-signalr extension', function () {
       assert.strictEqual(detail.error, error)
     })
 
-    it('emits a reconnected event with the new SignalR connection ID', async function () {
+    it('emits a reconnected event', async function () {
       const element = createProcessedHTML('<div hx-signalr:connect="/test-hub"></div>')
       await wait()
       const connection = mockHubConnections[0]
@@ -595,7 +595,6 @@ describe('hx-signalr extension', function () {
       connection.reconnected('new-id')
 
       assert.equal(detail.connection.url, '/test-hub')
-      assert.equal(detail.connectionId, 'new-id')
     })
 
     it('emits a close event when SignalR closes permanently', async function () {

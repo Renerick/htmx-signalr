@@ -1,211 +1,505 @@
-# htmx-signalr
+# hx-signalr
 
 > [!TIP]
-> If you are using htmx 1.0, switch to `htmx-1.0` branch for legacy version
+> For htmx 2, use the `htmx-2` branch. For the legacy htmx 1 implementation, use the `htmx-1.0` branch.
 
-> [!WARNING]
-> htmx 1.0 implementation of the extension relies on features available in htmx>=v1.8.0 and WILL BREAK on older versions.
+The htmx SignalR extension provides integration with SignalR servers for htmx-powered pages, allowing bidirectional
+real-time client-server communication. It's an ASP.NET Core-native alternative to htmx's WebSockets and SSE extensions.
 
-The SignalR extension allows to connect and interact with SignalR server directly from html.
-It establishes connection to the hub, subscribes to the events, allows to send messages to the server,
-processes incoming messages and swaps the content into your htmx page. In a way, it combines features from SSE
-and WebSockets extensions, allowing for bi-directional browser-server communication and supporting
-"channels" ("methods" in SignalR terminology) to distinguish messages between each other.
+SignalR is an open-source library that simplifies adding real-time web functionality to apps.
+Real-time web functionality enables server-side code to push content to clients instantly.
 
-[SignalR](https://docs.microsoft.com/en-us/aspnet/core/signalr/introduction?view=aspnetcore-6.0) is an open-source
-library that simplifies adding real-time web functionality to apps. Real-time web functionality enables server-side code
-to push content to clients instantly.
+This version of the extension is made for htmx 4.
+
+## Quick start
+
+On the client, install htmx, SignalR, and the extension script, and use the provided attributes:
+
+```html
+<script src="https://cdn.jsdelivr.net/npm/htmx.org@4.0.0/dist/htmx.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@microsoft/signalr@10.0.11/dist/browser/signalr.min.js"></script>
+<script src="/js/hx-signalr.js"></script>
+
+<section hx-signalr:connect="/chat">
+  <form hx-signalr:send="SendMessage">
+    <input name="message" required>
+    <button type="submit">Send</button>
+  </form>
+
+  <div hx-signalr:subscribe="ReceiveMessage"
+       hx-swap="beforeend"></div>
+</section>
+```
+
+On the ASP.NET Core server, create and register a SignalR hub:
+
+```csharp
+public sealed record ChatRequest(string Message);
+
+public sealed class ChatHub : Hub
+{
+    public async Task SendMessage(ChatRequest request)
+    {
+        var html = $"<p>{HtmlEncoder.Default.Encode(request.Message)}</p>";
+        await Clients.All.SendAsync("ReceiveMessage", html);
+    }
+}
+
+builder.Services.AddSignalR();
+app.MapHub<ChatHub>("/chat");
+```
 
 ## How to use
 
-Install the extension by including the script into your page, as well as SignalR library itself.
+Download the extension script from the `dist/` directory or build it from the TypeScript source yourself.
+You also need the htmx and SignalR scripts included in the page. Both should be included
+before the extension script:
 
 ```html
-
-<script src="https://unpkg.com/@microsoft/signalr@next/dist/browser/signalr.js"></script>
+<script src="/js/htmx.min.js"></script>
+<script src="/js/signalr.min.js"></script>
 <script src="/js/hx-signalr.js"></script>
 ```
 
-Activate the extension by adding `hx-ext` attribute to your page
+If you use the htmx 4 extension whitelist, add it there:
 
 ```html
-
-<div hx-ext="signalr">...</div>
+<meta name="htmx-config" content="extensions:hx-signalr">
 ```
 
-The extension provides three attributes to create and interact with the connection.
+### `hx-signalr:connect`
 
-### `signalr-connect`
-
-`signalr-connect` attribute is used to establish connection to SignalR hub. Pass hub URL as a value attribute in any
-format, supported by SignalR.
+This attribute marks an element as a HubConnection owner. It will create a hub connection via the specified URL.
 
 ```html
+<main hx-signalr:connect="/notifications">
+  <!-- This subscriber and sender use /notifications. -->
+  <output hx-signalr:subscribe="UnreadCount"></output>
+  <button hx-signalr:send="MarkAllRead">Mark all read</button>
 
-<div signalr-connect="/hub"></div>
+  <section hx-signalr:connect="/presence">
+    <!-- This subscriber uses /presence. -->
+    <output hx-signalr:subscribe="OnlineUsers"></output>
+  </section>
+</main>
 ```
 
-Other attributes will use the connection from the first parent in page structure.
-
-### `signalr-send`
-
-`signalr-send` attribute is used to send messages via SignalR connection. The data is serialized in an object, where
-fields are mapped from input elements
-and values from `hx-include`, `hx-vals`, etc. Additionally, [request headers](https://htmx.org/docs/#request-headers)
-are attached in `HEADERS` property.
+To delay the connection until a certain event, you can specify `hx-trigger` on the same element.
 
 ```html
+<section id="chat"
+         hx-signalr:connect="/chat"
+         hx-trigger="open-chat once">
+</section>
 
-<form signalr-send="echo">
-    <input type="text" name="message">
-    <button type="submit">Submit</button>
-</form>
+<button onclick="htmx.trigger('#chat', 'open-chat')">Open chat</button>
 ```
 
-The form above will be sent as
+Other attributes will find a connection to use by looking for a parent with an `hx-signalr:connect` attribute.
+
+### `hx-signalr:subscribe`
+
+This attribute subscribes the element to one or more client hub methods. Content from the incoming messages
+will be swapped the same way as usual htmx responses. All swap-related attributes
+(`hx-target`, `hx-swap`, `hx-select[-oob]`) are supported.
+
+```html
+<section hx-signalr:connect="/dashboard">
+  <div hx-signalr:subscribe="StatusChanged"></div>
+
+  <ol id="activity"></ol>
+  <div hx-signalr:subscribe="AuditCreated, AuditUpdated"
+       hx-target="#activity"
+       hx-swap="beforeend"></div>
+</section>
+```
+
+The method subscription expects a single method argument, which can be either a string or an object.
+
+String arguments are treated like raw HTML content and swapped as is:
+
+```csharp
+await Clients.All.SendAsync("StatusChanged", "<strong>Online</strong>");
+```
+
+Objects are expected to follow the following structure (which is *suspiciously* the same as the message
+format of the `hx-ws` extension):
 
 ```json
 {
-  "message": "<value>",
-  "HEADERS": {
-    ...
+  "content": "<li class=\"activity\">Deployment completed</li>",
+  "target": "#activity",
+  "swap": "beforeend settle:10ms",
+  "select": ".activity"
+}
+```
+
+| Property  | Purpose                           |
+| --------- | --------------------------------- |
+| `content` | HTML content that will be swapped |
+| `target`  | Server-side `hx-target` override  |
+| `swap`    | Server-side `hx-swap` override    |
+| `select`  | Server-side `hx-select` override  |
+
+You can send them from the server like so:
+
+```csharp
+await Clients.Caller.SendAsync("AuditCreated", new
+{
+    content = "<li class=\"activity\">Created</li>",
+    target = "#activity",
+    swap = "beforeend",
+    select = ".activity"
+});
+```
+
+### `hx-signalr:send`
+
+This attribute is used to send messages to the specified server method.
+
+```html
+<section hx-signalr:connect="/orders">
+  <form hx-signalr:send="CreateOrder">
+    <input name="productId" value="42">
+    <input name="quantity" type="number" value="2">
+    <button type="submit" name="action" value="buy">Buy</button>
+  </form>
+</section>
+```
+Request data will be serialized as a JSON object, where each form field is mapped into a corresponding property.
+Additionally, [htmx request headers](https://four.htmx.org/docs/#request-headers) are attached as a `headers`
+property:
+
+```json
+{
+  "productId": "42",
+  "quantity": "2",
+  "action": "buy",
+  "headers": {
+    "HX-Request": "true",
+    "HX-Source": "form",
+    "HX-Current-URL": "https://example.com/orders"
   }
 }
 ```
 
-That message can be handled by the following hub method
+`hx-vals` and `hx-include` attributes are supported as well.
 
-```csharp
-public async Task Echo(EchoRequest request)
-{
-  await Clients.Caller.SendAsync("echo", $@"<div id=""echo"">{request.message}</div><div hx-swap-oob=""true"" id=""echo-oob-data"">{new Random().Next()}</div>");
-}
-
-public record EchoRequest(string message);
-```
-
-:exclamation::exclamation: Please note, that your request object **MUST** define its fields as strings. The reason for this is the fact that HTML inputs
-have no distinction between numbers and strings values, but JSON has. Doing client-side conversion will inevitably cause many
-edge-cases and bugs. Server-side validation and mapping is much easier, although it does introduce a bit of a boilerplate.
-
-### `signalr-subscribe`
-
-`signalr-subscribe` attribute is used to declare client method and attach message handler to it. Received messages will
-be swapped into the page body.
-The default target is `innerHTML` of the element with that attribute. The target and swapping method can be changed
-with `hx-target` and `hx-swap` attributes. If the message
-contains OOB elements, they will also be processed as usual.
+Message sending from elements is serialized on the connection instance, so that messages will always be sent
+in the order in which sends were triggered, even if event handlers or `hx-vals` processing require async operations.
 
 ```html
-<!-- Standard subscription -->
-<div signalr-subscribe="counter">
-</div>
-
-<!-- Changing target and swapping method -->
-<div signalr-subscribe="echo" hx-target="#echo-target" hx-swap="beforeend">
-</div>
-<div id="echo-target"></div>
-<!-- OOB swapping is supported -->
-<div id="echo-oob-data"></div>
+<button hx-signalr:send="SaveDraft"
+        hx-include="#title"
+        hx-vals='js:{ revision: 3, token: await getToken() }'>
+  Save
+</button>
 ```
 
-When the message is received, it is processed with similar pipeline as standard htmx responses. That means that
-extensions that transform response content are supported, and you can, for example, use client side templates to render
-JSON data on the page.
+The message is sent on the specified `hx-trigger`. In case the attribute is not present, the following default
+events will be used instead:
 
-An element can be subscribed to multiple methods by passing their names as comma separated list. But be careful - the
-extension has no native way to specify different swap methods or targets for different methods, so messages for
-different methods can fight over the same target. Best way to use multiple subscriptions is to listen for the
-events with JS or _hyperscript and handle each method programmatically.
-
-### Events
-
-#### `htmx:signalr:start`
-
-This event is triggered once connection with the hub has been established. This event is raised on `signalr-connect` element.
-
-- `connectionId` contains id of SignalR connection object (if present)
-
-Cancelling the event has no effect.
-
-#### `htmx:signalr:message`
-
-This event is triggered on the elements with active method subscription when a message is received from the hub
-connection. `detail` property of the event has a few fields:
-
-- `message` contains message object as received by the handler. Can be modified by event handler, which will affect
-  next processing steps.
-- `method` contains the name of the method, that received the message. Can be used to filter events when using multiple
-  method subscriptions. Modifying this field has no effect.
-- `target` contains target element. Can be changed to redirect swapping to a different target element. Does not affect
-  OOB swaps.
-
-Cancelling the event will prevent any further processing.
-
-#### `htmx:signalr:beforeSend`
-
-This event is triggered just before sending a message. `detail` property contains the parameters of the message being sent, which can be modified by the event handler:
-
-- `method` contains the name of the method being called. Modifying this field will retarget the message to a different handler.
-- `headers` contains the headers, that will be attached into `HEADERS` field.
-- `allParameters` contains all parameters from the form inputs and `hx-vals` attributes.
-- `filteredParameters` contains all parameters after filtering is applied. The value from this field will be sent as-is.
-
-Cancelling the event will prevent sending.
-
-#### `htmx:signalr:afterSend`
-
-This event is triggered just after message was sent. Modifying the data in `details` property has no effect.
-
-- `method` contains the name of the method that was called.
-- `message` contains the data that was sent to the hub.
-
-Cancelling this event has no effect.
-
-#### `htmx:signalr:reconnecting`, `htmx:signalr:close`
-
-These events are matching with corresponding SignalR events
-[`onreconnecting`](https://learn.microsoft.com/en-us/javascript/api/%40microsoft/signalr/hubconnection?view=signalr-js-latest#@microsoft-signalr-hubconnection-onreconnecting),
-and [`onclose`](https://learn.microsoft.com/en-us/javascript/api/%40microsoft/signalr/hubconnection?view=signalr-js-latest#@microsoft-signalr-hubconnection-onclose).
-
-- `error` contains original SignalR error object (if present)
-
-#### `htmx:signalr:reconnected`
-
-These events are matching with corresponding SignalR event
-[`onreconnected`](https://learn.microsoft.com/en-us/javascript/api/%40microsoft/signalr/hubconnection?view=signalr-js-latest#@microsoft-signalr-hubconnection-onreconnected)
-
-- `connectionId` contains id of SignalR connection object (if present)
-
-You can use those events to display connection status in the UI and/or gracefully handle connection loss.
-Here is basic example of showing reconnection status using [`hx-on`](https://htmx.org/attributes/hx-on/) attribute
+| Element                                          | Default trigger |
+| ------------------------------------------------ | --------------- |
+| `<form>`                                         | `submit`        |
+| Text-like `<input>`, `<select>`, or `<textarea>` | `change`        |
+| Any other element                                | `click`         |
 
 ```html
-<div id="signalr-indicator" style="display: none;">Connecting to the hub...</div>
-<div hx-ext="signalr" signalr-connect="/hub"
-     hx-on:htmx:signalr:reconnecting="htmx.find('#signalr-indicator').style.display='block'"
-     hx-on:htmx:signalr:reconnected="htmx.find('#signalr-indicator').style.display='none'"></div>
+<button hx-signalr:send="Refresh"
+        hx-trigger="click once delay:250ms">
+  Refresh
+</button>
 ```
 
-### `htmx.createHubConnection`
+### Updating attributes at runtime
 
-Similar to WebSocket extension, it is possible to provide custom factory method for hub connection. This way you can
-control all aspects of the connection yourself.
+Previous versions of the extension tried their best to keep track of element attributes so that explicit
+reinitialization was not required. This version steps away from this approach. If you want to use
+custom JS to update `hx-signalr:*` attributes, you will need to call `htmx.process(element, true)` after
+the change, where `true` means full element reinitialization.
+
+The exception is `hx-signalr:send`, which will always use the actual attribute value. You still need to reinitialize
+the element if `hx-trigger` has changed.
 
 ```js
-htmx.createHubConnection = function (url) {
+const subscription = document.querySelector('#live-feed')
+subscription.setAttribute('hx-signalr:subscribe', 'ArchivedItem')
+htmx.process(subscription, true)
+```
+
+## Configuration
+
+Extension configuration is available through the global `htmx.config.signalr` object. It allows you to set SignalR
+HubConnection settings.
+
+```js
+htmx.config.signalr = {
+  logging: signalR.LogLevel.Information,
+  urlOptions: {
+    accessTokenFactory: () => sessionStorage.getItem('access-token')
+  },
+  automaticReconnect: [0, 2_000, 10_000, 30_000],
+  keepAliveInterval: 15_000,
+  serverTimeout: 30_000,
+  statefulReconnect: { bufferSize: 100_000 },
+  maxOutgoingMessagesQueueSize: 100
+}
+```
+
+Global configuration can be set with `<meta name="htmx-config">`. Element configuration via `hx-config` is also
+supported:
+
+```html
+<section hx-signalr:connect="/chat"
+         hx-config='{"signalr":{"automaticReconnect":[0,1000,5000],"serverTimeout":60000}}'>
+</section>
+```
+
+Refer to the SignalR [HubConnectionBuilder docs](https://learn.microsoft.com/en-us/javascript/api/@microsoft/signalr/hubconnectionbuilder?view=signalr-js-latest#methods) for detailed descriptions of its settings.
+
+`maxOutgoingMessagesQueueSize` sets the upper bound of the internal message queue, which is used to queue messages
+during hub reconnection.
+
+`createHubConnection` allows you to set a custom factory method for the HubConnection, giving you full
+control over its creation.
+
+```js
+htmx.config.signalr.createHubConnection = (url, owner, config) => {
+  console.debug('Creating a connection for', owner)
+
   return new signalR.HubConnectionBuilder()
-    .withUrl(url)
-    .withAutomaticReconnect(Array(100).fill(5000))   // attempt up to 100 reconnections every 5 seconds
+    .withUrl(url, config.urlOptions)
+    .withAutomaticReconnect()
     .build()
 }
 ```
 
+## Event reference
+
+The hx-signalr extension emits events for the hub connection lifecycle and incoming and outgoing message processing.
+They can be used to update page state based on connection and message status, customize connection configuration,
+or modify message content.
+
+Some events emit a `detail.cancelled` field. Setting it to `true` or calling `.preventDefault()`
+will halt the process that emitted the event.
+
+Some events expose a `waitUntil(work: Promise<unknown>)` method. It can be used to queue asynchronous work that
+will be awaited if event processing requires asynchronous operations.
+
+After the hub is connected, most events will expose a `connection` object. It's a wrapper around the raw
+`HubConnection` instance that handles message queueing, serialization, and safer event subscription. Please note
+that while it's just a JS object with public properties, modifying them may have no effect or may break the connection.
+Properties and methods that are not described below are implementation details and can be changed at any time.
+
+- `url: string` - hub URL
+- `config: HtmxSignalRConfig` - hub configuration
+- `subscribe(method: string, handleMessage: (m: any) => Promise<unknown>): void` - add method handler
+- `unsubscribe(m: string, handleMessage: (m: any) => Promise<unknown>): void` - remove method handler
+- `sendFromElement(elt: Element, messageProvider: Promise<OutgoingMessage>): Promise<void>` - sends a message
+  as if it was sent from an `hx-signalr:send` element, with all corresponding events emitted from said element.
+  `messageProvider` is the async provider of the message. For a description of `OutgoingMessage`, refer to the
+  `htmx:signalr:before:message:outgoing` event, `detail.message` field
+- `send(method: string, message: Record<string, unknown>, callback: () => {}): Promise<void>` - sends `message`
+  to the specified `method`. If the hub is reconnecting, sending will be queued internally until the
+  connection is reestablished. `callback` will be invoked after the message has been sent.
+- `stop(reason: string): void` stops the connection, halting all further operations
+
+### Connection events
+
+These events are emitted from the `hx-signalr:connect` element.
+
+#### `htmx:signalr:before:connection`
+
+This event is emitted when a hub connection is about to be established.
+
+- `detail.url` - hub URL. Can be modified
+- `detail.config` - configuration that will be used by the hub. Can be modified
+- `detail.cancelled` - cancellation flag
+
+```js
+document.addEventListener('htmx:signalr:before:connection', event => {
+  if (!currentUser.mayConnect) {
+    event.preventDefault()
+    return
+  }
+
+  event.detail.config.logging = signalR.LogLevel.Warning
+})
+```
+
+#### `htmx:signalr:after:connection`
+
+This event is emitted after the hub connection is fully established.
+
+- `detail.connection` - connection instance
+
+```js
+document.addEventListener('htmx:signalr:after:connection', event => {
+  console.log('Connected to', event.detail.connection.url)
+})
+```
+
+#### `htmx:signalr:reconnecting`
+
+This event is emitted when the hub connection starts trying to reconnect.
+
+- `detail.connection` - connection instance
+- `detail.error` - error that caused reconnection
+
+```js
+document.addEventListener('htmx:signalr:reconnecting', event => {
+  document.querySelector('#connection-state').textContent = 'Reconnecting…'
+  console.warn(event.detail.error)
+})
+```
+
+#### `htmx:signalr:reconnected`
+
+This event is emitted when the hub connection has reconnected successfully.
+
+- `detail.connection` - connection instance
+
+```js
+document.addEventListener('htmx:signalr:reconnected', event => {
+  document.querySelector('#connection-state').textContent = 'Connected'
+  console.log('Reconnected to', event.detail.connection.url)
+})
+```
+
+#### `htmx:signalr:close`
+
+This event is emitted when the hub connection has been fully closed.
+
+- `detail.connection` - connection instance
+- `detail.error` - error that caused closure
+- `detail.reason` - closure reason as text
+
+`reason` has the following built-in values:
+
+- `removed` when the connection element is cleaned up by htmx
+- `cancelled` when `htmx:signalr:before:connection` event is cancelled
+- `closed` when the connection is closed otherwise
+
+You can pass your own value to the connection instance's `stop(reason)` method.
+
+```js
+document.addEventListener('htmx:signalr:close', event => {
+  console.log(`Connection ${event.detail.reason}`, event.detail.error)
+})
+```
+
+### `htmx:signalr:error`
+
+This event is emitted when an unexpected error occurs.
+
+- `detail.error` - the error object
+
+```js
+document.addEventListener('htmx:signalr:error', event => {
+  console.error('SignalR extension error:', event.detail.error)
+})
+```
+
+### Subscription events
+
+These events are emitted from `hx-signalr:subscribe` elements.
+
+#### `htmx:signalr:before:message:incoming`
+
+This event is emitted when a message has been received and before any processing.
+
+- `detail.connection` - connection instance
+- `detail.cancelled` - cancellation flag
+- `detail.message.method` - method that received the message
+- `detail.message.data` - raw content of the message. Can be modified
+- `detail.waitUntil()` - queues async work to wait for before further processing
+
+```js
+document.addEventListener('htmx:signalr:before:message:incoming', event => {
+  if (event.detail.message.method === 'AdminNotice' && !currentUser.isAdmin) {
+    event.preventDefault()
+    return
+  }
+
+  event.detail.waitUntil(loadDisplayPreferences().then(preferences => {
+    event.detail.message.data = decorateMessage(
+      event.detail.message.data,
+      preferences
+    )
+  }))
+})
+```
+
+#### `htmx:signalr:after:message:incoming`
+
+This event is emitted when a message has been received and after processing is fully completed.
+
+- `detail.connection` - connection instance
+- `detail.message.method` - method that received the message
+- `detail.message.data` - raw content of the message
+
+```js
+document.addEventListener('htmx:signalr:after:message:incoming', event => {
+  console.log('Swapped message from', event.detail.message.method)
+})
+```
+
+### Sending events
+
+These events are emitted from `hx-signalr:send` elements.
+
+#### `htmx:signalr:before:message:outgoing`
+
+This event is emitted when message sending has been triggered, after all the needed information for the message
+has been collected, and before the message is sent.
+
+- `detail.connection` - connection instance
+- `detail.cancelled` - cancellation flag
+- `detail.message.method` - destination method for the message. Can be modified
+- `detail.message.values` - form values that will be sent. Can be modified
+- `detail.message.headers` - htmx headers that will be sent. Can be modified
+- `detail.message.data` - raw content of the message. Can be modified.
+
+  Initially, it's `undefined`, and later it will be filled by combining `values` and `headers`.
+  If an event handler sets a value, that value will be sent as is instead.
+
+- `detail.waitUntil()` - queues async work to wait for before further processing
+
+```js
+document.addEventListener('htmx:signalr:before:message:outgoing', event => {
+  event.detail.waitUntil(getAccessToken().then(token => {
+    event.detail.message.headers.Authorization = `Bearer ${token}`
+  }))
+
+  if (event.detail.message.method === 'DeleteAccount') {
+    event.detail.message.data = {
+      confirmation: 'DELETE',
+      headers: event.detail.message.headers
+    }
+  }
+})
+```
+
+#### `htmx:signalr:after:message:outgoing`
+
+This event is emitted when a message has been sent.
+
+- `detail.connection` - connection instance
+- `detail.message.method` - destination method for the message
+- `detail.message.values` - form values that were sent
+- `detail.message.headers` - htmx headers that were sent
+- `detail.message.data` - raw content of the sent message
+
+```js
+document.addEventListener('htmx:signalr:after:message:outgoing', event => {
+  console.log('Sent', event.detail.message.method)
+})
+```
+
 ## License
 
-This library is licensed under the terms of [MIT License](LICENSE)
+This project is licensed under the [MIT License](LICENSE).
 
-The implementation is based on the official [SSE](https://github.com/bigskysoftware/htmx/blob/master/src/ext/sse.js)
-and [WebSockets](https://github.com/bigskysoftware/htmx/blob/master/src/ext/ws.js)
-extensions from [htmx](https://github.com/bigskysoftware/htmx) by Big Sky Software, which are licensed under the terms
-of [BSD Zero-Clause License](https://github.com/bigskysoftware/htmx/blob/master/LICENSE).
+The implementation is based on the official WebSocket extension, licensed under the
+[BSD Zero-Clause License](https://github.com/bigskysoftware/htmx/blob/master/LICENSE).

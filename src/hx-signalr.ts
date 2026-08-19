@@ -20,6 +20,8 @@ type OutgoingMessage = {
     data: Record<string, unknown> | undefined
 }
 
+type ClosureReason = 'removed' | 'cancelled' | 'closed' | string
+
 declare interface IConnectController {
     get url(): string;
     get config(): HtmxSignalRConfig;
@@ -31,7 +33,7 @@ declare interface IConnectController {
     send(method: string, message: Record<string, unknown>, callback: () => {}): Promise<void>;
 
     start(): Promise<void>;
-    stop(reason: string): void;
+    stop(reason: ClosureReason): void;
 };
 
 declare interface ISubscribeController {
@@ -104,7 +106,7 @@ declare module './htmx-internal-api' {
         private hubConnection: HubConnection | null;
         public config: HtmxSignalRConfig;
         public url: string;
-        private stopReason: string | null;
+        private stopReason: ClosureReason | null;
 
         private queue: Promise<void>;
 
@@ -137,9 +139,8 @@ declare module './htmx-internal-api' {
                 cancelled: false
             }
 
-            if (!api.triggerHtmxEvent(this.ownerElement, 'htmx:signalr:before:connection', {
-                connection: beforeConnectionDetails
-            }) || beforeConnectionDetails.cancelled) {
+            if (!api.triggerHtmxEvent(this.ownerElement, 'htmx:signalr:before:connection', beforeConnectionDetails
+            ) || beforeConnectionDetails.cancelled) {
 
                 api.triggerHtmxEvent(this.ownerElement, 'htmx:signalr:close', {
                     connection: beforeConnectionDetails,
@@ -296,10 +297,9 @@ declare module './htmx-internal-api' {
                     error: e
                 })
             });
-            this.hubConnection.onreconnected(async connectionId => {
+            this.hubConnection.onreconnected(async () => {
                 api.triggerHtmxEvent(this.ownerElement, 'htmx:signalr:reconnected', {
                     connection: this,
-                    connectionId: connectionId
                 })
                 await this.flushSendQueue();
             });
@@ -480,10 +480,10 @@ declare module './htmx-internal-api' {
                 }
 
 
-                htmx.swap(ctx);
+                await htmx.swap(ctx);
                 api.triggerHtmxEvent(this.ownerElement, 'htmx:signalr:after:message:incoming', {
                     message: incomingDetails.message,
-                    conneciton: incomingDetails.connection
+                    connection: incomingDetails.connection
                 });
             });
         }
