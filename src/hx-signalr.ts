@@ -19,11 +19,17 @@ type IncomingMessage = {
     select: string
 }
 
+type OutgoingMessage = {
+    method: string | undefined,
+    headers: Record<string, string>,
+    values: Record<string, unknown>,
+    data: Record<string, unknown> | undefined
+}
+
 declare interface IConnectController {
+    sendFromElement(elt: Element, messageProvider: Promise<OutgoingMessage>): Promise<void>;
     subscribe(m: string, handleMessage: (m: any) => Promise<unknown>): void;
     unsubscribe(m: string, handleMessage: (m: any) => Promise<unknown>): void;
-    outboxIsFull(): boolean;
-    serialized(work: (ConnectController: any) => Promise<void>): Promise<void>;
     buildConnectionDetails(): ConnectionDetails;
     send(method: string, message: Record<string, unknown>, callback: () => {}): Promise<void>;
     start(): Promise<void>;
@@ -115,8 +121,9 @@ declare module './htmx-internal-api' {
 
             this.queue = Promise.resolve();
             this.sendOutbox = [];
+            this.pendingSubscriptions = new Map();
         }
-        serialized(work: (ConnectController: any) => Promise<void>) {
+        private serialized(work: (ConnectController: any) => Promise<void>): Promise<void> {
             this.queue = this.queue.then(() => work(this)).catch(() => { });
             return this.queue;
         }
@@ -139,6 +146,10 @@ declare module './htmx-internal-api' {
                 return Promise.resolve();
             }
 
+            if (!this.ownerElement.isConnected) {
+                return Promise.resolve();
+            }
+
             this.url = connectionDetails.url;
             this.config = connectionDetails.config;
 
@@ -158,12 +169,28 @@ declare module './htmx-internal-api' {
             return this.hubConnection?.stop();
         }
 
-        subscribe(m: string, handleMessage: (m: string, d: string | IncomingMessage) => Promise<void>): void {
-            this.hubConnection?.on(m, handleMessage);
+        private pendingSubscriptions: Map<string, ((d: string | IncomingMessage) => Promise<unknown>)[]>
+
+        subscribe(method: string, handleMessage: (d: string | IncomingMessage) => Promise<unknown>): void {
+            if (this.hubConnection) {
+                this.hubConnection.on(method, handleMessage);
+            } else {
+                if (!this.pendingSubscriptions.has(method)) {
+                    this.pendingSubscriptions.set(method, []);
+                }
+
+                this.pendingSubscriptions.get(method)?.push(handleMessage);
+            }
         }
 
-        unsubscribe(m: string, handleMessage: (m: any) => Promise<unknown>): void {
-            this.hubConnection?.off(m, handleMessage);
+        unsubscribe(method: string, handleMessage: (d: string | IncomingMessage) => Promise<unknown>): void {
+            if (this.hubConnection) {
+                this.hubConnection.off(method, handleMessage);
+            } else if (this.pendingSubscriptions.has(method)) {
+                let pendingHandlers = this.pendingSubscriptions.get(method)!;
+                let i = pendingHandlers.indexOf(handleMessage);
+                pendingHandlers.splice(i, 1);
+            }
         }
 
 
@@ -182,6 +209,50 @@ declare module './htmx-internal-api' {
             }
 
             this.sendOutbox.push(item);
+        }
+
+        sendFromElement(elt: Element, messageProvider: Promise<OutgoingMessage>): Promise<void> {
+            return this.serialized(async (controller: ConnectController) => {
+                if (this.outboxIsFull()) {
+                    let error = new Error('Outgoing message queue is full');
+                    api.triggerHtmxEvent(elt, "htmx:signalr:error", { error })
+                    return;
+                }
+
+                let message = await messageProvider;
+                if (!message.method) {
+                    let error = new Error('Method for message sending is not specified');
+                    api.triggerHtmxEvent(elt, "htmx:signalr:error", { error })
+                    return;
+                }
+
+                let awaitables: Promise<unknown>[] = [];
+                let outgoingDetails = {
+                    message,
+                    connection: controller.buildConnectionDetails(),
+                    cancelled: false,
+                    waitUntil: (promise: Promise<unknown>) => { awaitables.push(promise); }
+                };
+
+                if (!api.triggerHtmxEvent(elt, 'htmx:signalr:before:message:outgoing', outgoingDetails)) {
+                    return;
+                }
+
+                await Promise.all(awaitables);
+
+                if (outgoingDetails.cancelled) {
+                    return;
+                }
+
+                message.data ??= { ...message.values, headers: message.headers };
+
+                await controller.send(message.method, message.data, () => {
+                    api.triggerHtmxEvent(elt, 'htmx:signalr:after:message:outgoing', {
+                        message: outgoingDetails.message,
+                        connection: outgoingDetails.connection,
+                    })
+                });
+            })
         }
 
         async send(method: string, data: Record<string, unknown>, callback: () => void): Promise<void> {
@@ -244,6 +315,12 @@ declare module './htmx-internal-api' {
                 })
                 await this.flushSendQueue();
             });
+
+            this.pendingSubscriptions.forEach((handlers, method) => {
+                handlers.forEach(h => {
+                    this.hubConnection?.on(method, h);
+                })
+            })
         }
 
         private getHubUrl() {
@@ -436,7 +513,7 @@ declare module './htmx-internal-api' {
             }
             let connectController = this.connectController;
 
-            let currentMethods = new Set(api.attributeValue(this.ownerElement, ATTR.SUBSCRIBE)?.split(',').map(s => s.trim()));
+            let currentMethods = new Set(api.attributeValue(this.ownerElement, ATTR.SUBSCRIBE)?.split(',').map(s => s.trim().toLowerCase()));
             let existingMethods = new Set(this.handlers.keys());
 
             let toSubscribe = currentMethods.difference(existingMethods);
@@ -463,7 +540,6 @@ declare module './htmx-internal-api' {
 
         static attachIfNeeded(elt: Element) {
             if (elt._htmx?.signalr?.subscribe) {
-                elt._htmx.signalr.subscribe.start();
                 return elt._htmx.signalr.subscribe;
             }
 
@@ -487,7 +563,7 @@ declare module './htmx-internal-api' {
         }
     }
 
-    async function sendCollectMessage(elt: Element, event: Event) {
+    async function sendCollectMessage(elt: Element, event: Event): Promise<OutgoingMessage> {
         let method = api.attributeValue(elt, ATTR.SEND);
         let ctx = api.createRequestContext(elt, event);
         let headers = ctx.request.headers;
@@ -552,51 +628,7 @@ declare module './htmx-internal-api' {
                 return;
             }
 
-
-            let messagePromise = sendCollectMessage(elt, event);
-
-            await connectController.serialized(async (controller: ConnectController) => {
-                if (connectController.outboxIsFull()) {
-                    let error = new Error('Outgoing message queue is full');
-                    api.triggerHtmxEvent(elt, "htmx:signalr:error", { error })
-                    return;
-                }
-
-                let message = await messagePromise;
-                if (!message.method) {
-                    let error = new Error('Method for message sending is not specified');
-                    api.triggerHtmxEvent(elt, "htmx:signalr:error", { error })
-                    return;
-                }
-
-                let awaitables: Promise<unknown>[] = [];
-                let outgoingDetails = {
-                    message,
-                    connection: controller.buildConnectionDetails(),
-                    cancelled: false,
-                    waitUntil: (promise: Promise<unknown>) => { awaitables.push(promise); }
-                };
-
-                if (!api.triggerHtmxEvent(elt, 'htmx:signalr:before:message:outgoing', outgoingDetails)) {
-                    return;
-                }
-
-                await Promise.all(awaitables);
-
-                if (outgoingDetails.cancelled) {
-                    return;
-                }
-
-
-                message.data ??= { ...message.values, headers: message.headers };
-
-                await controller.send(message.method, message.data, () => {
-                    api.triggerHtmxEvent(elt, 'htmx:signalr:after:message:outgoing', {
-                        message: outgoingDetails.message,
-                        connection: outgoingDetails.connection,
-                    })
-                });
-            })
+            await connectController.sendFromElement(elt, sendCollectMessage(elt, event));
         }
 
         api.onTrigger(elt, trigger, sendingHandler);
