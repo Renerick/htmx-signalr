@@ -305,7 +305,7 @@ describe('hx-signalr extension', function () {
       const sub = page.querySelector('#sub')
       const eventConnections = []
       sub.addEventListener('htmx:signalr:before:message:incoming', event => {
-        eventConnections.push(event.detail.connection.hub)
+        eventConnections.push(event.detail.connection.url)
       })
       assert.lengthOf(mockHubConnections[0].handlers.get('echo'), 1)
       page.querySelector('#two').append(sub)
@@ -315,7 +315,7 @@ describe('hx-signalr extension', function () {
       assert.lengthOf(mockHubConnections[1].handlers.get('echo'), 1)
       await mockHubConnections[1].emit('echo', 'New owner')
       await mockHubConnections[0].emit('echo', 'Old owner')
-      assert.deepEqual(eventConnections, [mockHubConnections[1]])
+      assert.deepEqual(eventConnections, ['/two'])
       assert.equal(sub.textContent, 'New owner')
     })
 
@@ -460,16 +460,16 @@ describe('hx-signalr extension', function () {
       assert.strictEqual(mockHubConnections[0].url, '/custom-hub')
     })
 
-    it('emits an hx-ws-style before connection event', function () {
+    it('emits a before connection event', function () {
       playground().innerHTML = '<div hx-signalr:connect="/test-hub"></div>'
       const element = playground().firstElementChild
+      let beforeConnection
       let beforeUrl
-      let beforeHub
       let beforeAutomaticReconnect
       let beforeQueueSize
       element.addEventListener('htmx:signalr:before:connection', event => {
+        beforeConnection = event.detail.connection
         beforeUrl = event.detail.connection.url
-        beforeHub = event.detail.connection.hub
         beforeAutomaticReconnect = event.detail.connection.config.automaticReconnect
         beforeQueueSize = event.detail.connection.config.maxOutgoingMessagesQueueSize
       })
@@ -477,27 +477,27 @@ describe('hx-signalr extension', function () {
       htmx.process(playground())
 
       assert.equal(beforeUrl, '/test-hub')
-      assert.isNull(beforeHub)
+      assert.hasAllKeys(beforeConnection, ['url', 'config', 'cancelled'])
       assert.strictEqual(beforeAutomaticReconnect, true)
       assert.strictEqual(beforeQueueSize, 100)
     })
 
-    it('emits an hx-ws-style after connection event', async function () {
+    it('emits an after connection event', async function () {
       playground().innerHTML = '<div hx-signalr:connect="/test-hub"></div>'
       const element = playground().firstElementChild
-      let eventConnection
       let afterDetail
-      element.addEventListener('htmx:signalr:before:connection', event => {
-        eventConnection = event.detail.connection
-      })
       element.addEventListener('htmx:signalr:after:connection', event => { afterDetail = event.detail })
 
       htmx.process(playground())
 
       await wait()
 
-      assert.isTrue(afterDetail.connection === eventConnection)
-      assert.isTrue(afterDetail.connection.hub === mockHubConnections[0])
+      assert.equal(afterDetail.connection.url, '/test-hub')
+      assert.isFunction(afterDetail.connection.subscribe)
+      assert.isFunction(afterDetail.connection.unsubscribe)
+      assert.isFunction(afterDetail.connection.send)
+      assert.isFunction(afterDetail.connection.sendFromElement)
+      assert.isFunction(afterDetail.connection.stop)
     })
 
     it('allows before connection listeners to cancel creation', function () {
@@ -581,7 +581,7 @@ describe('hx-signalr extension', function () {
 
       connection.reconnecting(error)
 
-      assert.strictEqual(detail.connection.hub, connection)
+      assert.equal(detail.connection.url, '/test-hub')
       assert.strictEqual(detail.error, error)
     })
 
@@ -594,7 +594,7 @@ describe('hx-signalr extension', function () {
 
       connection.reconnected('new-id')
 
-      assert.strictEqual(detail.connection.hub, connection)
+      assert.equal(detail.connection.url, '/test-hub')
       assert.equal(detail.connectionId, 'new-id')
     })
 
@@ -609,7 +609,7 @@ describe('hx-signalr extension', function () {
 
       connection.close(error)
 
-      assert.strictEqual(detail.connection.hub, connection)
+      assert.equal(detail.connection.url, '/test-hub')
       assert.strictEqual(detail.error, error)
       assert.equal(detail.reason, 'closed')
     })
@@ -623,7 +623,7 @@ describe('hx-signalr extension', function () {
 
       assert.equal(mockHubConnections[0].stopCalls, 1)
       assert.equal(closeDetail.reason, 'removed')
-      assert.isTrue(closeDetail.connection.hub === mockHubConnections[0])
+      assert.equal(closeDetail.connection.url, '/test-hub')
     })
     it('stops the owned connection when htmx removes its parent', async function () {
       const element = createProcessedHTML('<div id="parent"><div hx-signalr:connect="/test-hub"></div></div>')
@@ -673,7 +673,7 @@ describe('hx-signalr extension', function () {
       assert.sameMembers([...mockHubConnections[0].handlers.keys()], ['echo', 'counter', 'notification'])
     })
 
-    it('emits an before incoming event and waits for asynchronous work', async function () {
+    it('emits a before incoming event and waits for asynchronous work', async function () {
       const owner = createProcessedHTML(`
         <div hx-signalr:connect="/test-hub">
           <div id="subscription" hx-signalr:subscribe="echo">Original</div>
@@ -689,7 +689,7 @@ describe('hx-signalr extension', function () {
 
       await mockHubConnections[0].emit('echo', '<p>Original message</p>')
 
-      assert.isTrue(beforeDetail.connection.hub === mockHubConnections[0])
+      assert.equal(beforeDetail.connection.url, '/test-hub')
       assert.equal(beforeDetail.message.method, 'echo')
       assert.equal(beforeDetail.message.data, '<p>Changed asynchronously</p>')
       assert.equal(owner.querySelector('#subscription').textContent, 'Changed asynchronously')
@@ -1131,7 +1131,7 @@ describe('hx-signalr extension', function () {
   })
 
   describe('outgoing messages', function () {
-    it('emits an before outgoing event and waits for asynchronous work', async function () {
+    it('emits a before outgoing event and waits for asynchronous work', async function () {
       const owner = createProcessedHTML(`
         <div hx-signalr:connect="/test-hub">
           <button hx-signalr:send="draft" name="kind" value="note">Send</button>
@@ -1152,7 +1152,7 @@ describe('hx-signalr extension', function () {
       await wait()
 
       const sent = mockHubConnections[0].sentMessages[0]
-      assert.isTrue(beforeDetail.connection.hub === mockHubConnections[0])
+      assert.equal(beforeDetail.connection.url, '/test-hub')
       assert.equal(sent.method, 'publish')
       assert.equal(sent.message.kind, 'note')
       assert.equal(sent.message.extra, 'added asynchronously')

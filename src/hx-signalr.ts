@@ -6,12 +6,6 @@ import { HtmxSignalRConfig } from './htmx-config';
 declare const htmx: import('htmx.org').Htmx;
 declare const signalR: typeof import('@microsoft/signalr');
 
-type ConnectionDetails = {
-    hub: HubConnection | null,
-    url: string,
-    config: HtmxSignalRConfig
-}
-
 type IncomingMessage = {
     content: string,
     swap: string,
@@ -27,11 +21,15 @@ type OutgoingMessage = {
 }
 
 declare interface IConnectController {
-    sendFromElement(elt: Element, messageProvider: Promise<OutgoingMessage>): Promise<void>;
+    get url(): string;
+    get config(): HtmxSignalRConfig;
+
     subscribe(m: string, handleMessage: (m: any) => Promise<unknown>): void;
     unsubscribe(m: string, handleMessage: (m: any) => Promise<unknown>): void;
-    buildConnectionDetails(): ConnectionDetails;
+
+    sendFromElement(elt: Element, messageProvider: Promise<OutgoingMessage>): Promise<void>;
     send(method: string, message: Record<string, unknown>, callback: () => {}): Promise<void>;
+
     start(): Promise<void>;
     stop(reason: string): void;
 };
@@ -104,8 +102,8 @@ declare module './htmx-internal-api' {
     class ConnectController implements IConnectController {
         private ownerElement: Element;
         private hubConnection: HubConnection | null;
-        private config: HtmxSignalRConfig;
-        private url: string;
+        public config: HtmxSignalRConfig;
+        public url: string;
         private stopReason: string | null;
 
         private queue: Promise<void>;
@@ -128,19 +126,23 @@ declare module './htmx-internal-api' {
             return this.queue;
         }
 
-        start() {
-            let connectionDetails = {
+        async start() {
+            if (this.hubConnection) {
+                return;
+            }
+
+            let beforeConnectionDetails = {
                 url: this.url,
-                hub: null as HubConnection | null,
                 config: this.config,
                 cancelled: false
             }
 
-            if (!api.triggerHtmxEvent(this.ownerElement, 'htmx:signalr:before:connection', { connection: connectionDetails })
-                || connectionDetails.cancelled) {
+            if (!api.triggerHtmxEvent(this.ownerElement, 'htmx:signalr:before:connection', {
+                connection: beforeConnectionDetails
+            }) || beforeConnectionDetails.cancelled) {
 
                 api.triggerHtmxEvent(this.ownerElement, 'htmx:signalr:close', {
-                    connection: connectionDetails,
+                    connection: beforeConnectionDetails,
                     reason: 'cancelled'
                 })
                 return Promise.resolve();
@@ -150,18 +152,17 @@ declare module './htmx-internal-api' {
                 return Promise.resolve();
             }
 
-            this.url = connectionDetails.url;
-            this.config = connectionDetails.config;
+            this.url = beforeConnectionDetails.url;
+            this.config = beforeConnectionDetails.config;
 
             this.hubConnection = this.createHub();
             this.connectHubEvents();
 
-            connectionDetails.hub = this.hubConnection;
-
-            return this.hubConnection.start().then(() => {
-                api.triggerHtmxEvent(this.ownerElement, 'htmx:signalr:after:connection', { connection: connectionDetails })
-                this.flushSendQueue();
+            await this.hubConnection.start();
+            api.triggerHtmxEvent(this.ownerElement, 'htmx:signalr:after:connection', {
+                connection: this
             });
+            this.flushSendQueue();
         }
 
         stop(reason: string) {
@@ -212,7 +213,7 @@ declare module './htmx-internal-api' {
         }
 
         sendFromElement(elt: Element, messageProvider: Promise<OutgoingMessage>): Promise<void> {
-            return this.serialized(async (controller: ConnectController) => {
+            return this.serialized(async () => {
                 if (this.outboxIsFull()) {
                     let error = new Error('Outgoing message queue is full');
                     api.triggerHtmxEvent(elt, "htmx:signalr:error", { error })
@@ -229,7 +230,7 @@ declare module './htmx-internal-api' {
                 let awaitables: Promise<unknown>[] = [];
                 let outgoingDetails = {
                     message,
-                    connection: controller.buildConnectionDetails(),
+                    connection: this,
                     cancelled: false,
                     waitUntil: (promise: Promise<unknown>) => { awaitables.push(promise); }
                 };
@@ -246,7 +247,7 @@ declare module './htmx-internal-api' {
 
                 message.data ??= { ...message.values, headers: message.headers };
 
-                await controller.send(message.method, message.data, () => {
+                await this.send(message.method, message.data, () => {
                     api.triggerHtmxEvent(elt, 'htmx:signalr:after:message:outgoing', {
                         message: outgoingDetails.message,
                         connection: outgoingDetails.connection,
@@ -277,40 +278,27 @@ declare module './htmx-internal-api' {
             }
         }
 
-        buildConnectionDetails() {
-            let connectionDetails = {
-                url: this.url,
-                hub: this.hubConnection,
-                config: this.config,
-            };
-
-            return connectionDetails;
-        }
-
         private connectHubEvents() {
             if (!this.hubConnection) {
                 throw new Error("Hub connection is not created");
             }
             this.hubConnection.onclose(e => {
-                let connectionDetails = this.buildConnectionDetails();
                 api.triggerHtmxEvent(this.ownerElement, 'htmx:signalr:close', {
-                    connection: connectionDetails,
+                    connection: this,
                     error: e,
                     reason: this.stopReason ?? 'closed'
                 })
                 this.sendOutbox.length = 0;
             });
             this.hubConnection.onreconnecting(e => {
-                let connectionDetails = this.buildConnectionDetails();
                 api.triggerHtmxEvent(this.ownerElement, 'htmx:signalr:reconnecting', {
-                    connection: connectionDetails,
+                    connection: this,
                     error: e
                 })
             });
             this.hubConnection.onreconnected(async connectionId => {
-                let connectionDetails = this.buildConnectionDetails();
                 api.triggerHtmxEvent(this.ownerElement, 'htmx:signalr:reconnected', {
-                    connection: connectionDetails,
+                    connection: this,
                     connectionId: connectionId
                 })
                 await this.flushSendQueue();
@@ -449,7 +437,7 @@ declare module './htmx-internal-api' {
                     method: method,
                     data: data
                 },
-                connection: this.connectController!.buildConnectionDetails(),
+                connection: this.connectController,
                 cancelled: false,
                 waitUntil: (promise: Promise<unknown>) => { awaitables.push(promise); }
             };
