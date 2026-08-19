@@ -1,3 +1,10 @@
+## 2026-09-13
+
+* Updated to htmx 4
+  * Brand new TypeScript codebase with cleaner structure
+  * .NET 10 Demo
+  * Extensive test coverage, courtesy of Codex
+
 ## 2023-11-21
 
 * Exposed `onreconnecting`, `onreconnected` and `close` SignalR Hub events
