@@ -1,0 +1,13 @@
+{
+  "name": "htmx-signalr-tests",
+  "private": true,
+  "scripts": {
+    "build": "tsc --project tsconfig.json",
+    "typecheck": "tsc --project tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@microsoft/signalr": "^10.0.11",
+    "htmx.org": "4.0.0",
+    "typescript": "^7.0.2"
+  }
+}

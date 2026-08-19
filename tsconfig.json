@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleDetection": "legacy",
+    "lib": ["ESNext", "DOM"],
+    "rootDir": "src",
+    "outDir": "dist",
+    "strict": true,
+    "erasableSyntaxOnly": true,
+    "noEmitOnError": true,
+    "removeComments": false,
+    "sourceMap": false,
+    "skipLibCheck": false,
+  },
+  "include": ["src/**/*.ts"]
+}
