@@ -3,10 +3,14 @@ import type {
     IHttpConnectionOptions,
     ILogger,
     IRetryPolicy,
+    IStatefulReconnectOptions,
     LogLevel,
 } from '@microsoft/signalr';
 
 export interface HtmxSignalRConfig {
+    statefulReconnect?: IStatefulReconnectOptions;
+    serverTimeout?: number;
+    keepAliveInterval?: number;
     logging?: LogLevel | string | ILogger | false;
     urlOptions?: IHttpConnectionOptions;
     automaticReconnect?: boolean | number[] | IRetryPolicy;
@@ -23,3 +27,4 @@ declare module 'htmx.org' {
         signalr?: HtmxSignalRConfig;
     }
 }
+

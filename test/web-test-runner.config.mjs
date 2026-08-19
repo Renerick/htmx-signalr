@@ -7,7 +7,7 @@ export default {
       <head>
         <meta charset="utf-8">
         <meta name="htmx-config" content='{
-          "extensions": "signalr",
+          "extensions": "hx-signalr",
           "history": false,
           "includeIndicatorCSS": false,
           "defaultSettleDelay": 0

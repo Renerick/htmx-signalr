@@ -1,8 +1,9 @@
-describe('hx-signalr extension', function() {
+describe('hx-signalr extension', function () {
   let defaultPrefix
   let defaultSignalRConfig
   let mockHubConnections
   let mockBuilders
+  let originalConsoleError
 
   class MockHubConnection {
     static nextId = 1
@@ -117,15 +118,27 @@ describe('hx-signalr extension', function() {
   function installSignalRMock() {
     window.signalR = {
       HubConnectionBuilder: MockHubConnectionBuilder,
+      HubConnectionState: {
+        Disconnected: 'Disconnected',
+        Connecting: 'Connecting',
+        Connected: 'Connected',
+        Disconnecting: 'Disconnecting',
+        Reconnecting: 'Reconnecting'
+      }
     }
   }
 
-  before(function() {
+  function suppressConsoleError() {
+    console.error = function () { }
+  }
+
+  before(function () {
     defaultPrefix = htmx.config.prefix
     defaultSignalRConfig = { ...htmx.config.signalr }
   })
 
-  beforeEach(function() {
+  beforeEach(function () {
+    originalConsoleError = console.error
     setupTest()
     MockHubConnection.nextId = 1
     mockHubConnections = []
@@ -135,15 +148,16 @@ describe('hx-signalr extension', function() {
     htmx.config.signalr = { ...defaultSignalRConfig }
   })
 
-  afterEach(async function() {
+  afterEach(async function () {
+    console.error = originalConsoleError
     await cleanupTest()
     htmx.config.prefix = defaultPrefix
     htmx.config.signalr = { ...defaultSignalRConfig }
     delete window.signalRScriptTest
   })
 
-  describe('review regressions', function() {
-    it('does not add send listeners when processing an existing subtree', async function() {
+  describe('review regressions', function () {
+    it('does not add send listeners when processing an existing subtree', async function () {
       const owner = createProcessedHTML('<div hx-signalr:connect="/hub"><button hx-signalr:send="save">Save</button></div>')
       htmx.process(owner)
       htmx.process(owner)
@@ -152,7 +166,7 @@ describe('hx-signalr extension', function() {
       assert.lengthOf(mockHubConnections[0].sentMessages, 1)
     })
 
-    it('replaces send triggers and cancels old delayed callbacks on forced reprocessing', async function() {
+    it('replaces send triggers and cancels old delayed callbacks on forced reprocessing', async function () {
       const owner = createProcessedHTML('<div hx-signalr:connect="/hub"><button hx-signalr:send="save" hx-trigger="click delay:20ms">Save</button></div>')
       const button = owner.querySelector('button')
       button.click()
@@ -171,7 +185,7 @@ describe('hx-signalr extension', function() {
       assert.lengthOf(mockHubConnections[0].sentMessages, 1)
     })
 
-    it('preserves unrelated listeners when forcibly reprocessing a send trigger', async function() {
+    it('preserves unrelated listeners when forcibly reprocessing a send trigger', async function () {
       const owner = createProcessedHTML('<div hx-signalr:connect="/hub"><button hx-signalr:send="save">Save</button></div>')
       const button = owner.querySelector('button')
       let clicks = 0
@@ -189,7 +203,7 @@ describe('hx-signalr extension', function() {
       assert.lengthOf(mockHubConnections[0].sentMessages, 1)
     })
 
-    it('cancels and reinstalls send triggers during forced reprocessing', async function() {
+    it('cancels and reinstalls send triggers during forced reprocessing', async function () {
       const owner = createProcessedHTML('<div hx-signalr:connect="/hub"><button hx-signalr:send="save" hx-trigger="click delay:20ms">Save</button></div>')
       const button = owner.querySelector('button')
 
@@ -203,7 +217,7 @@ describe('hx-signalr extension', function() {
       assert.lengthOf(mockHubConnections[0].sentMessages, 1)
     })
 
-    it('prevents native form submission before a delayed trigger runs', async function() {
+    it('prevents native form submission before a delayed trigger runs', async function () {
       const owner = createProcessedHTML('<div hx-signalr:connect="/hub"><form hx-signalr:send="save" hx-trigger="submit delay:20ms"></form></div>')
       const form = owner.querySelector('form')
       let preventedAtTarget
@@ -216,12 +230,12 @@ describe('hx-signalr extension', function() {
       assert.lengthOf(mockHubConnections[0].sentMessages, 1)
     })
 
-    it('installs inline handlers before the initial connection event', function() {
+    it('installs inline handlers before the initial connection event', function () {
       createProcessedHTML('<div hx-signalr:connect="/hub" hx-on:htmx:signalr:before:connection="event.preventDefault()"></div>')
       assert.lengthOf(mockHubConnections, 0)
     })
 
-    it('preserves checkbox activation for its default change trigger', async function() {
+    it('preserves checkbox activation for its default change trigger', async function () {
       const owner = createProcessedHTML('<div hx-signalr:connect="/hub"><input type="checkbox" name="enabled" hx-signalr:send="save"></div>')
       const checkbox = owner.querySelector('input')
       checkbox.click()
@@ -231,7 +245,7 @@ describe('hx-signalr extension', function() {
       assert.equal(mockHubConnections[0].sentMessages[0].message.enabled, 'on')
     })
 
-    it('restores outgoing capacity after interception is cancelled', async function() {
+    it('restores outgoing capacity after interception is cancelled', async function () {
       htmx.config.signalr.maxOutgoingMessagesQueueSize = 1
       const owner = createProcessedHTML('<div hx-signalr:connect="/hub"><button hx-signalr:send="save">Save</button></div>')
       const button = owner.querySelector('button')
@@ -244,7 +258,8 @@ describe('hx-signalr extension', function() {
     })
 
     for (const stage of ['interception', 'transport']) {
-      it(`restores outgoing capacity after a ${stage} failure`, async function() {
+      it(`restores outgoing capacity after a ${stage} failure`, async function () {
+        suppressConsoleError()
         htmx.config.signalr.maxOutgoingMessagesQueueSize = 1
         const owner = createProcessedHTML('<div hx-signalr:connect="/hub"><button hx-signalr:send="save">Save</button></div>')
         const button = owner.querySelector('button')
@@ -259,23 +274,18 @@ describe('hx-signalr extension', function() {
         } else {
           hub.send = () => Promise.reject(failure)
         }
-        const originalConsoleError = console.error
-        console.error = function() {}
-        try {
-          button.click()
-          await wait()
-          hub.send = MockHubConnection.prototype.send
-          button.click()
-          await wait()
-          assert.deepEqual(errors, [failure])
-          assert.lengthOf(hub.sentMessages, 1)
-        } finally {
-          console.error = originalConsoleError
-        }
+        button.click()
+        await wait()
+        hub.send = MockHubConnection.prototype.send
+        button.click()
+        await wait()
+        assert.deepEqual(errors, [failure])
+        assert.lengthOf(hub.sentMessages, 1)
       })
     }
 
-    it('retains capacity while a failed send waits for reconnect', async function() {
+    it('retains capacity while a failed send waits for reconnect', async function () {
+      suppressConsoleError()
       htmx.config.signalr.maxOutgoingMessagesQueueSize = 1
       const owner = createProcessedHTML('<div hx-signalr:connect="/hub"><button hx-signalr:send="save">Save</button></div>')
       await wait()
@@ -283,31 +293,25 @@ describe('hx-signalr extension', function() {
       const hub = mockHubConnections[0]
       const errors = []
       owner.addEventListener('htmx:signalr:error', event => errors.push(event.detail.error))
-      hub.send = function() {
+      hub.send = function () {
         this.reconnecting()
         return Promise.reject(new Error('Disconnected during send'))
       }
-      const originalConsoleError = console.error
-      console.error = function() {}
-      try {
-        button.click()
-        await wait()
-        button.click()
-        await wait()
-        assert.deepEqual(errors, ['Outgoing messages queue is full'])
-        hub.send = MockHubConnection.prototype.send
-        hub.reconnected()
-        await wait()
-        button.click()
-        await wait()
-        assert.lengthOf(hub.sentMessages, 2)
-        assert.lengthOf(errors, 1)
-      } finally {
-        console.error = originalConsoleError
-      }
+      button.click()
+      await wait()
+      button.click()
+      await wait()
+      assert.deepEqual(errors, ['Outgoing messages queue is full'])
+      hub.send = MockHubConnection.prototype.send
+      hub.reconnected()
+      await wait()
+      button.click()
+      await wait()
+      assert.lengthOf(hub.sentMessages, 2)
+      assert.lengthOf(errors, 1)
     })
 
-    it('reserves a single connection during reentrant processing', async function() {
+    it('reserves a single connection during reentrant processing', async function () {
       playground().innerHTML = '<div hx-signalr:connect="/hub"></div>'
       const owner = playground().firstElementChild
       owner.addEventListener('htmx:signalr:before:connection', () => htmx.process(owner), { once: true })
@@ -317,7 +321,7 @@ describe('hx-signalr extension', function() {
       assert.equal(mockHubConnections[0].stopCalls, 1)
     })
 
-    it('does not create a connection for an owner removed by its connection listener', function() {
+    it('does not create a connection for an owner removed by its connection listener', function () {
       playground().innerHTML = '<div hx-signalr:connect="/hub"></div>'
       const owner = playground().firstElementChild
       owner.addEventListener('htmx:signalr:before:connection', () => owner.remove(), { once: true })
@@ -325,17 +329,17 @@ describe('hx-signalr extension', function() {
       assert.lengthOf(mockHubConnections, 0)
     })
 
-    it('keeps the replacement connection when a close listener reprocesses the owner', function() {
+    it('keeps the replacement connection when a close listener reprocesses the owner', function () {
       const owner = createProcessedHTML('<div hx-signalr:connect="/one"></div>')
       owner.addEventListener('htmx:signalr:close', () => htmx.process(owner), { once: true })
       owner.setAttribute('hx-signalr:connect', '/two')
-      htmx.process(owner)
+      htmx.process(owner, true)
       assert.lengthOf(mockHubConnections, 2)
       assert.equal(mockHubConnections[0].stopCalls, 1)
       assert.equal(mockHubConnections[1].url, '/two')
     })
 
-    it('captures the server method when each send is triggered', async function() {
+    it('captures the server method when each send is triggered', async function () {
       const owner = createProcessedHTML('<div hx-signalr:connect="/hub"><button hx-signalr:send="save">Save</button></div>')
       const button = owner.querySelector('button')
       let release
@@ -349,7 +353,7 @@ describe('hx-signalr extension', function() {
       assert.deepEqual(mockHubConnections[0].sentMessages.map(send => send.method), ['save', 'save'])
     })
 
-    it('removes only its own SignalR method handler', async function() {
+    it('removes only its own SignalR method handler', async function () {
       const owner = createProcessedHTML('<div hx-signalr:connect="/hub"><div hx-signalr:subscribe="echo"></div></div>')
       let received = 0
       mockHubConnections[0].on('echo', () => { received++ })
@@ -359,28 +363,28 @@ describe('hx-signalr extension', function() {
       assert.equal(received, 1)
     })
 
-    it('shares case-insensitive subscriptions and preserves the remaining subscriber', async function() {
+    it('shares case-insensitive subscriptions and preserves the remaining subscriber', async function () {
       const owner = createProcessedHTML('<div hx-signalr:connect="/hub"><div id="one" hx-signalr:subscribe="Echo,echo"></div><div id="two" hx-signalr:subscribe="echo"></div></div>')
       let messages = 0
       owner.addEventListener('htmx:signalr:before:message:incoming', () => { messages++ })
       const first = owner.querySelector('#one')
-      await htmx.swaphubElement.getAttribute( sourceElement: first, target: first, text: '', swap: 'delete' })
+      await htmx.swaphubElement.getAttribute({ sourceElement: first, target: first, text: '', swap: 'delete' })
       await mockHubConnections[0].emit('ECHO', 'Still subscribed')
       assert.equal(messages, 1)
       assert.equal(owner.querySelector('#two').textContent, 'Still subscribed')
     })
 
-    it('transfers a moved subscriber to its current connection owner', async function() {
+    it('transfers a moved subscriber to its current connection owner', async function () {
       const page = createProcessedHTML('<main><div id="one" hx-signalr:connect="/one"><div id="sub" hx-signalr:subscribe="echo"></div></div><div id="two" hx-signalr:connect="/two"></div></main>')
       const sub = page.querySelector('#sub')
       page.querySelector('#two').append(sub)
-      htmx.process(sub)
+      htmx.process(sub, true)
       await mockHubConnections[1].emit('echo', 'New owner')
       await mockHubConnections[0].emit('echo', 'Old owner')
       assert.equal(sub.textContent, 'New owner')
     })
 
-    it('clears and deletes targets with empty structured content', async function() {
+    it('clears and deletes targets with empty structured content', async function () {
       const owner = createProcessedHTML('<div hx-signalr:connect="/hub"><div id="sub" hx-signalr:subscribe="echo">Old</div></div>')
       await mockHubConnections[0].emit('echo', { content: '', swap: 'innerHTML swapEmpty:true' })
       assert.equal(owner.querySelector('#sub').innerHTML, '')
@@ -388,7 +392,8 @@ describe('hx-signalr extension', function() {
       assert.isNull(owner.querySelector('#sub'))
     })
 
-    it('counts asynchronous interception against the outgoing capacity', async function() {
+    it('counts asynchronous interception against the outgoing capacity', async function () {
+      suppressConsoleError()
       htmx.config.signalr.maxOutgoingMessagesQueueSize = 1
       const owner = createProcessedHTML('<div hx-signalr:connect="/hub"><button hx-signalr:send="save">Save</button></div>')
       await wait()
@@ -401,8 +406,6 @@ describe('hx-signalr extension', function() {
         event.detail.waitUntil(pending)
       })
       owner.addEventListener('htmx:signalr:error', event => { errors.push(event.detail.error) })
-      const originalConsoleError = console.error
-      console.error = function() {}
       try {
         for (let i = 0; i < 25; i++) owner.querySelector('button').click()
         await wait()
@@ -413,11 +416,10 @@ describe('hx-signalr extension', function() {
         assert.lengthOf(hub.sentMessages, 1)
       } finally {
         release()
-        console.error = originalConsoleError
       }
     })
 
-    it('does not send or swap pending messages after closing during interception', async function() {
+    it('does not send or swap pending messages after closing during interception', async function () {
       const owner = createProcessedHTML('<div hx-signalr:connect="/hub"><button hx-signalr:send="save">Save</button><div hx-signalr:subscribe="echo">Old</div></div>')
       let beforeCount = 0
       let started, release
@@ -443,7 +445,8 @@ describe('hx-signalr extension', function() {
       assert.equal(owner.querySelector('[hx-signalr\\:subscribe]').textContent, 'Old')
     })
 
-    it('reuses the controller without waiting for a replaced hub to finish sending', async function() {
+    it('reuses the controller without waiting for a replaced hub to finish sending', async function () {
+      suppressConsoleError()
       htmx.config.signalr.maxOutgoingMessagesQueueSize = 1
       const owner = createProcessedHTML('<div hx-signalr:connect="/one"><button hx-signalr:send="save">Save</button></div>')
       const button = owner.querySelector('button')
@@ -464,7 +467,7 @@ describe('hx-signalr extension', function() {
       button.click()
       await sendStarted
       owner.setAttribute('hx-signalr:connect', '/two')
-      htmx.process(owner)
+      htmx.process(owner, true)
       button.click()
       await sendFinished
       rejectSend(new Error('Old transport failed after replacement'))
@@ -477,7 +480,7 @@ describe('hx-signalr extension', function() {
       assert.isEmpty(errors)
     })
 
-    it('buffers sends while the initial connection is still starting', async function() {
+    it('buffers sends while the initial connection is still starting', async function () {
       let start
       htmx.config.signalr.createHubConnection = url => {
         const hub = new MockHubConnection(url)
@@ -498,8 +501,8 @@ describe('hx-signalr extension', function() {
     })
   })
 
-  describe('connection lifecycle', function() {
-    it('builds and starts a connection for hx-signalr:connect', async function() {
+  describe('connection lifecycle', function () {
+    it('uses load as the default connection trigger', async function () {
       const element = createProcessedHTML('<div hx-signalr:connect="/test-hub"></div>')
       await wait()
 
@@ -508,7 +511,25 @@ describe('hx-signalr extension', function() {
       assert.equal(mockHubConnections[0].startCalls, 1)
     })
 
-    it('configures the default SignalR builder', function() {
+    it('starts a connection according to hx-trigger', async function () {
+      const element = createProcessedHTML('<div hx-signalr:connect="/test-hub" hx-trigger="connect delay:20ms"></div>')
+
+      assert.lengthOf(mockHubConnections, 0)
+
+      element.dispatchEvent(new Event('connect'))
+      assert.lengthOf(mockHubConnections, 0)
+
+      await wait(30)
+      assert.lengthOf(mockHubConnections, 1)
+      const connection = mockHubConnections[0]
+      assert.equal(connection.startCalls, 1)
+
+      element.dispatchEvent(new Event('connect'))
+      await wait(30)
+      assert.equal(connection.startCalls, 1)
+    })
+
+    it('configures the default SignalR builder', function () {
       createProcessedHTML('<div hx-signalr:connect="/test-hub"></div>')
 
       assert.deepEqual(mockBuilders[0].options, {
@@ -517,7 +538,7 @@ describe('hx-signalr extension', function() {
       })
     })
 
-    it('configures logging and URL options from htmx.config.signalr', function() {
+    it('configures logging and URL options from htmx.config.signalr', function () {
       const urlOptions = { transport: 'webSockets' }
       htmx.config.signalr.logging = 'Information'
       htmx.config.signalr.urlOptions = urlOptions
@@ -528,7 +549,7 @@ describe('hx-signalr extension', function() {
       assert.deepEqual(mockBuilders[0].options.urlOptions, urlOptions)
     })
 
-    it('configures automatic reconnect from htmx.config.signalr', function() {
+    it('configures automatic reconnect from htmx.config.signalr', function () {
       const retryDelays = [0, 1000, 5000]
       htmx.config.signalr.automaticReconnect = retryDelays
 
@@ -537,7 +558,7 @@ describe('hx-signalr extension', function() {
       assert.deepEqual(mockBuilders[0].options.automaticReconnect, retryDelays)
     })
 
-    it('can disable automatic reconnect from htmx.config.signalr', function() {
+    it('can disable automatic reconnect from htmx.config.signalr', function () {
       htmx.config.signalr.automaticReconnect = false
 
       createProcessedHTML('<div hx-signalr:connect="/test-hub"></div>')
@@ -545,7 +566,7 @@ describe('hx-signalr extension', function() {
       assert.notProperty(mockBuilders[0].options, 'automaticReconnect')
     })
 
-    it('allows hx-config to override the global SignalR config', function() {
+    it('allows hx-config to override the global SignalR config', function () {
       htmx.config.signalr.automaticReconnect = false
 
       createProcessedHTML(`
@@ -556,7 +577,7 @@ describe('hx-signalr extension', function() {
       assert.deepEqual(mockBuilders[0].options.automaticReconnect, [0, 250])
     })
 
-    it('supports a custom connection factory in htmx.config.signalr', function() {
+    it('supports a custom connection factory in htmx.config.signalr', function () {
       let received
       htmx.config.signalr.createHubConnection = (url, element, config) => {
         received = { url, element, config }
@@ -574,23 +595,19 @@ describe('hx-signalr extension', function() {
       assert.strictEqual(mockHubConnections[0].url, '/custom-hub')
     })
 
-    it('emits hx-ws-style before and after connection events', async function() {
+    it('emits an hx-ws-style before connection event', function () {
       playground().innerHTML = '<div hx-signalr:connect="/test-hub"></div>'
       const element = playground().firstElementChild
-      let eventConnection
       let beforeUrl
       let beforeHub
       let beforeAutomaticReconnect
       let beforeQueueSize
-      let afterDetail
       element.addEventListener('htmx:signalr:before:connection', event => {
-        eventConnection = event.detail.connection
         beforeUrl = event.detail.connection.url
         beforeHub = event.detail.connection.hub
         beforeAutomaticReconnect = event.detail.connection.config.automaticReconnect
         beforeQueueSize = event.detail.connection.config.maxOutgoingMessagesQueueSize
       })
-      element.addEventListener('htmx:signalr:after:connection', event => { afterDetail = event.detail })
 
       htmx.process(playground())
 
@@ -598,6 +615,19 @@ describe('hx-signalr extension', function() {
       assert.isNull(beforeHub)
       assert.strictEqual(beforeAutomaticReconnect, true)
       assert.strictEqual(beforeQueueSize, 100)
+    })
+
+    it('emits an hx-ws-style after connection event', async function () {
+      playground().innerHTML = '<div hx-signalr:connect="/test-hub"></div>'
+      const element = playground().firstElementChild
+      let eventConnection
+      let afterDetail
+      element.addEventListener('htmx:signalr:before:connection', event => {
+        eventConnection = event.detail.connection
+      })
+      element.addEventListener('htmx:signalr:after:connection', event => { afterDetail = event.detail })
+
+      htmx.process(playground())
 
       await wait()
 
@@ -605,7 +635,7 @@ describe('hx-signalr extension', function() {
       assert.isTrue(afterDetail.connection.hub === mockHubConnections[0])
     })
 
-    it('allows before connection listeners to cancel creation', function() {
+    it('allows before connection listeners to cancel creation', function () {
       playground().innerHTML = '<div hx-signalr:connect="/test-hub"></div>'
       const element = playground().firstElementChild
       let closeDetail
@@ -618,10 +648,9 @@ describe('hx-signalr extension', function() {
 
       assert.lengthOf(mockHubConnections, 0)
       assert.equal(closeDetail.reason, 'cancelled')
-      assert.isNull(closeDetail.code)
     })
 
-    it('allows before connection listeners to configure connection creation', function() {
+    it('allows before connection listeners to configure connection creation', function () {
       playground().innerHTML = '<div hx-signalr:connect="/test-hub"></div>'
       const element = playground().firstElementChild
       let received
@@ -643,7 +672,7 @@ describe('hx-signalr extension', function() {
       assert.isFalse(received.config.automaticReconnect)
     })
 
-    it('creates independent connections for independent owners', function() {
+    it('creates independent connections for independent owners', function () {
       createProcessedHTML(`
         <main>
           <section hx-signalr:connect="/one"></section>
@@ -655,7 +684,7 @@ describe('hx-signalr extension', function() {
       assert.deepEqual(mockHubConnections.map(connection => connection.url), ['/one', '/two'])
     })
 
-    it('reuses the connection when the owner is processed again with the same URL', function() {
+    it('reuses the connection when the owner is processed again with the same URL', function () {
       const element = createProcessedHTML('<div hx-signalr:connect="/test-hub"></div>')
 
       htmx.process(element)
@@ -663,44 +692,72 @@ describe('hx-signalr extension', function() {
       assert.lengthOf(mockHubConnections, 1)
     })
 
-    it('stops the previous connection when the owner URL changes', function() {
+    it('stops the previous connection when the owner is forcibly reprocessed', function () {
       const element = createProcessedHTML('<div hx-signalr:connect="/one"></div>')
       const previousConnection = mockHubConnections[0]
 
-      element.setAttribute('hx-signalr:connect', '/two')
-      htmx.process(element)
+      htmx.process(element, true)
 
       assert.lengthOf(mockHubConnections, 2)
       assert.equal(previousConnection.stopCalls, 1)
     })
 
-    it('emits connection events while reconnecting and closing', async function() {
-      const element = createProcessedHTML('<div hx-signalr:connect="/test-hub"></div>')
-      await wait()
-      const events = []
-      for (const name of ['before:connection', 'after:connection', 'close']) {
-        element.addEventListener(`htmx:signalr:${name}`, event => events.push([name, event.detail]))
-      }
-      const error = new Error('disconnected')
-      const originalConsoleError = console.error
-      console.error = function() {}
+    it('stops the previous connection when the owner URL changes and is forcibly reprocessed', function () {
+      const element = createProcessedHTML('<div hx-signalr:connect="/one"></div>')
+      const previousConnection = mockHubConnections[0]
 
-      try {
-        mockHubConnections[0].reconnecting(error)
-        mockHubConnections[0].reconnected('new-id')
-        mockHubConnections[0].close(error)
-      } finally {
-        console.error = originalConsoleError
-      }
+      element.setAttribute('hx-signalr:connect', '/two')
+      htmx.process(element, true)
 
-      assert.equal(events[0][0], 'before:connection')
-      assert.equal(events[1][0], 'after:connection')
-      assert.equal(events[2][0], 'close')
-      assert.strictEqual(events[2][1].error, error)
-      assert.equal(events[2][1].reason, 'closed')
+      assert.lengthOf(mockHubConnections, 2)
+      assert.equal(previousConnection.stopCalls, 1)
     })
 
-    it('stops the owned connection when htmx removes its element', async function() {
+    it('emits a reconnecting event with the SignalR error', async function () {
+      suppressConsoleError()
+      const element = createProcessedHTML('<div hx-signalr:connect="/test-hub"></div>')
+      await wait()
+      const connection = mockHubConnections[0]
+      let detail
+      element.addEventListener('htmx:signalr:reconnecting', event => { detail = event.detail })
+      const error = new Error('disconnected')
+
+      connection.reconnecting(error)
+
+      assert.strictEqual(detail.connection.hub, connection)
+      assert.strictEqual(detail.error, error)
+    })
+
+    it('emits a reconnected event with the new SignalR connection ID', async function () {
+      const element = createProcessedHTML('<div hx-signalr:connect="/test-hub"></div>')
+      await wait()
+      const connection = mockHubConnections[0]
+      let detail
+      element.addEventListener('htmx:signalr:reconnected', event => { detail = event.detail })
+
+      connection.reconnected('new-id')
+
+      assert.strictEqual(detail.connection.hub, connection)
+      assert.equal(detail.connectionId, 'new-id')
+    })
+
+    it('emits a close event when SignalR closes permanently', async function () {
+      suppressConsoleError()
+      const element = createProcessedHTML('<div hx-signalr:connect="/test-hub"></div>')
+      await wait()
+      const connection = mockHubConnections[0]
+      let detail
+      element.addEventListener('htmx:signalr:close', event => { detail = event.detail })
+      const error = new Error('disconnected')
+
+      connection.close(error)
+
+      assert.strictEqual(detail.connection.hub, connection)
+      assert.strictEqual(detail.error, error)
+      assert.equal(detail.reason, 'closed')
+    })
+
+    it('stops the owned connection when htmx removes its element', async function () {
       const element = createProcessedHTML('<div hx-signalr:connect="/test-hub"></div>')
       let closeDetail
       element.addEventListener('htmx:signalr:close', event => { closeDetail = event.detail })
@@ -711,7 +768,7 @@ describe('hx-signalr extension', function() {
       assert.equal(closeDetail.reason, 'removed')
       assert.isTrue(closeDetail.connection.hub === mockHubConnections[0])
     })
-    it('stops the owned connection when htmx removes its parent', async function() {
+    it('stops the owned connection when htmx removes its parent', async function () {
       const element = createProcessedHTML('<div id="parent"><div hx-signalr:connect="/test-hub"></div></div>')
 
       await htmx.swap({ text: '', target: '#parent', swap: 'delete', sourceElement: element })
@@ -719,7 +776,7 @@ describe('hx-signalr extension', function() {
       assert.equal(mockHubConnections[0].stopCalls, 1)
     })
 
-    it('supports the configured htmx attribute prefix', function() {
+    it('supports the configured htmx attribute prefix', function () {
       htmx.config.prefix = 'data-hx-'
 
       createProcessedHTML('<div data-hx-signalr:connect="/prefixed"></div>')
@@ -728,30 +785,28 @@ describe('hx-signalr extension', function() {
       assert.equal(mockHubConnections[0].url, '/prefixed')
     })
 
-    it('emits an error event when SignalR is unavailable', function() {
+    it('emits an error event when SignalR is unavailable', function () {
+      suppressConsoleError()
       const originalSignalR = window.signalR
       playground().innerHTML = '<div hx-signalr:connect="/test-hub"></div>'
       const element = playground().firstElementChild
       let detail
       element.addEventListener('htmx:signalr:error', event => { detail = event.detail })
-      const originalConsoleError = console.error
 
       try {
         window.signalR = undefined
-        console.error = function() {}
         assert.doesNotThrow(() => htmx.process(playground()))
       } finally {
-        console.error = originalConsoleError
         window.signalR = originalSignalR
       }
 
-      assert.equal(detail.error, 'SignalR object not found. Make sure to include SignalR script in the page scripts before this extension.')
       assert.lengthOf(mockHubConnections, 0)
+      assert.equal(detail.error.message, 'SignalR object not found. Include SignalR script in the page scripts before this extenion.')
     })
   })
 
-  describe('subscriptions and incoming messages', function() {
-    it('subscribes to each comma-separated method', function() {
+  describe('subscriptions and incoming messages', function () {
+    it('subscribes to each comma-separated method', function () {
       createProcessedHTML(`
         <div hx-signalr:connect="/test-hub">
           <div hx-signalr:subscribe="echo, counter ,notification"></div>
@@ -761,7 +816,7 @@ describe('hx-signalr extension', function() {
       assert.sameMembers([...mockHubConnections[0].handlers.keys()], ['echo', 'counter', 'notification'])
     })
 
-    it('emits hx-ws-style incoming events and waits for asynchronous work', async function() {
+    it('emits hx-ws-style incoming events and waits for asynchronous work', async function () {
       const owner = createProcessedHTML(`
         <div hx-signalr:connect="/test-hub">
           <div id="subscription" hx-signalr:subscribe="echo">Original</div>
@@ -786,7 +841,7 @@ describe('hx-signalr extension', function() {
       assert.isTrue(afterDetail.message === beforeDetail.message)
     })
 
-    it('allows incoming message listeners to cancel processing', async function() {
+    it('allows incoming message listeners to cancel processing', async function () {
       const owner = createProcessedHTML(`
         <div hx-signalr:connect="/test-hub">
           <div id="subscription" hx-signalr:subscribe="echo">Original</div>
@@ -804,7 +859,7 @@ describe('hx-signalr extension', function() {
       assert.isFalse(afterFired)
     })
 
-    it('serializes incoming message processing', async function() {
+    it('serializes incoming message processing', async function () {
       const owner = createProcessedHTML(`
         <div hx-signalr:connect="/test-hub">
           <div hx-signalr:subscribe="echo"></div>
@@ -835,7 +890,7 @@ describe('hx-signalr extension', function() {
       assert.deepEqual(order, ['before:first', 'after:first', 'before:second', 'after:second'])
     })
 
-    it('does not process a delayed message after its connection is replaced', async function() {
+    it('does not process a delayed message after its connection is replaced', async function () {
       const owner = createProcessedHTML(`
         <div hx-signalr:connect="/one">
           <div id="subscription" hx-signalr:subscribe="echo"></div>
@@ -855,7 +910,7 @@ describe('hx-signalr extension', function() {
       const staleMessage = mockHubConnections[0].emit('echo', '<p>Stale</p>')
       await interceptionStarted
       owner.setAttribute('hx-signalr:connect', '/two')
-      htmx.process(owner)
+      htmx.process(owner, true)
       await mockHubConnections[1].emit('echo', '<p>Fresh</p>')
 
       releaseMessage()
@@ -864,7 +919,7 @@ describe('hx-signalr extension', function() {
       assert.equal(owner.querySelector('#subscription').textContent, 'Fresh')
     })
 
-    it('updates every subscriber to the same method once', async function() {
+    it('updates every subscriber to the same method once', async function () {
       const owner = createProcessedHTML(`
         <div hx-signalr:connect="/test-hub">
           <div id="first" hx-signalr:subscribe="echo">First</div>
@@ -878,7 +933,7 @@ describe('hx-signalr extension', function() {
       assert.equal(owner.querySelector('#second').textContent, 'Updated')
     })
 
-    it('does not duplicate subscriptions when an element is processed again', async function() {
+    it('does not duplicate subscriptions when an element is processed again', async function () {
       const owner = createProcessedHTML(`
         <div hx-signalr:connect="/test-hub">
           <div id="subscription" hx-signalr:subscribe="echo"></div>
@@ -894,7 +949,7 @@ describe('hx-signalr extension', function() {
       assert.equal(messages, 1)
     })
 
-    it('swaps string messages into the subscription element by default', async function() {
+    it('swaps string messages into the subscription element by default', async function () {
       const owner = createProcessedHTML(`
         <div hx-signalr:connect="/test-hub">
           <div id="subscription" hx-signalr:subscribe="echo">Old</div>
@@ -907,7 +962,7 @@ describe('hx-signalr extension', function() {
       assert.equal(owner.querySelector('#subscription').innerHTML, '<p>New</p>')
     })
 
-    it('swaps raw text messages into the subscription element', async function() {
+    it('swaps raw text messages into the subscription element', async function () {
       const owner = createProcessedHTML(`
         <div hx-signalr:connect="/test-hub">
           <div id="subscription" hx-signalr:subscribe="echo">Old message</div>
@@ -920,7 +975,7 @@ describe('hx-signalr extension', function() {
       assert.equal(owner.querySelector('#subscription').textContent, 'New message')
     })
 
-    it('handles structured JSON messages using the hx-ws protocol', async function() {
+    it('handles structured JSON messages using the hx-ws protocol', async function () {
       const owner = createProcessedHTML(`
         <div hx-signalr:connect="/test-hub">
           <div hx-signalr:subscribe="echo">Subscription</div>
@@ -942,7 +997,7 @@ describe('hx-signalr extension', function() {
       assert.isNull(owner.querySelector('#messages > .ignored'))
     })
 
-    it('uses hx-target and hx-swap for incoming messages', async function() {
+    it('uses hx-target and hx-swap for incoming messages', async function () {
       const owner = createProcessedHTML(`
         <div hx-signalr:connect="/test-hub">
           <div hx-signalr:subscribe="echo" hx-target="#messages" hx-swap="beforeend"></div>
@@ -957,7 +1012,7 @@ describe('hx-signalr extension', function() {
       assert.include(owner.querySelector('#messages').innerHTML, 'Second')
     })
 
-    it('uses hx-select for incoming messages', async function() {
+    it('uses hx-select for incoming messages', async function () {
       const owner = createProcessedHTML(`
         <div hx-signalr:connect="/test-hub">
           <div hx-signalr:subscribe="echo" hx-select=".selected"></div>
@@ -970,7 +1025,7 @@ describe('hx-signalr extension', function() {
       assert.equal(owner.querySelector('[hx-signalr\\:subscribe]').innerHTML, '<p class="selected">Keep</p>')
     })
 
-    it('processes hx-partial responses through htmx', async function() {
+    it('processes hx-partial responses through htmx', async function () {
       const owner = createProcessedHTML(`
         <div hx-signalr:connect="/test-hub">
           <div hx-signalr:subscribe="echo">Subscription</div>
@@ -985,7 +1040,7 @@ describe('hx-signalr extension', function() {
       assert.equal(owner.querySelector('[hx-signalr\\:subscribe]').textContent, 'Subscription')
     })
 
-    it('executes scripts in swapped messages', async function() {
+    it('executes scripts in swapped messages', async function () {
       createProcessedHTML(`
         <div hx-signalr:connect="/test-hub">
           <div hx-signalr:subscribe="echo"></div>
@@ -998,7 +1053,7 @@ describe('hx-signalr extension', function() {
       assert.equal(window.signalRScriptTest, 'executed')
     })
 
-    it('ignores undefined messages', async function() {
+    it('ignores undefined messages', async function () {
       const owner = createProcessedHTML(`
         <div hx-signalr:connect="/test-hub">
           <div id="subscription" hx-signalr:subscribe="echo">Original</div>
@@ -1011,7 +1066,7 @@ describe('hx-signalr extension', function() {
       assert.equal(owner.querySelector('#subscription').textContent, 'Original')
     })
 
-    it('ignores null messages', async function() {
+    it('ignores null messages', async function () {
       const owner = createProcessedHTML(`
         <div hx-signalr:connect="/test-hub">
           <div id="subscription" hx-signalr:subscribe="echo">Original</div>
@@ -1024,7 +1079,7 @@ describe('hx-signalr extension', function() {
       assert.equal(owner.querySelector('#subscription').textContent, 'Original')
     })
 
-    it('applies OOB-only updates without clearing the subscription element', async function() {
+    it('applies OOB-only updates without clearing the subscription element', async function () {
       const owner = createProcessedHTML(`
         <div hx-signalr:connect="/test-hub">
           <div id="subscription" hx-signalr:subscribe="echo">Original</div>
@@ -1039,7 +1094,7 @@ describe('hx-signalr extension', function() {
       assert.equal(owner.querySelector('#status').textContent, 'Connected')
     })
 
-    it('honors an explicit swapEmpty:true modifier', async function() {
+    it('honors an explicit swapEmpty:true modifier', async function () {
       const owner = createProcessedHTML(`
         <div hx-signalr:connect="/test-hub">
           <div id="subscription" hx-signalr:subscribe="echo" hx-swap="innerHTML swapEmpty:true">Original</div>
@@ -1054,7 +1109,7 @@ describe('hx-signalr extension', function() {
       assert.equal(owner.querySelector('#status').textContent, 'Connected')
     })
 
-    it('uses hx-select-oob for client-selected OOB updates', async function() {
+    it('uses hx-select-oob for client-selected OOB updates', async function () {
       const owner = createProcessedHTML(`
         <div hx-signalr:connect="/test-hub">
           <div id="subscription" hx-signalr:subscribe="echo" hx-select-oob="#status">Original</div>
@@ -1069,7 +1124,7 @@ describe('hx-signalr extension', function() {
       assert.equal(owner.querySelector('#status').textContent, 'Connected')
     })
 
-    it('keeps updating remaining subscribers after one is removed', async function() {
+    it('keeps updating remaining subscribers after one is removed', async function () {
       const owner = createProcessedHTML(`
         <div hx-signalr:connect="/test-hub">
           <div id="first" hx-signalr:subscribe="echo"></div>
@@ -1086,7 +1141,7 @@ describe('hx-signalr extension', function() {
       assert.equal(owner.querySelector('#second').textContent, 'Updated')
     })
 
-    it('updates method registration when a subscription element is replaced', async function() {
+    it('updates method registration when a subscription element is replaced', async function () {
       const owner = createProcessedHTML(`
         <div hx-signalr:connect="/test-hub">
           <div id="subscription" hx-signalr:subscribe="echo"></div>
@@ -1107,7 +1162,7 @@ describe('hx-signalr extension', function() {
       assert.equal(owner.querySelector('#subscription').textContent, 'Updated')
     })
 
-    it('unsubscribes immediately when htmx removes a subscription element', async function() {
+    it('unsubscribes immediately when htmx removes a subscription element', async function () {
       const owner = createProcessedHTML(`
         <div hx-signalr:connect="/test-hub">
           <div id="subscription" hx-signalr:subscribe="echo"></div>
@@ -1125,8 +1180,8 @@ describe('hx-signalr extension', function() {
 
   })
 
-  describe('attribute updates', function() {
-    it('uses an updated connection URL after reprocessing', async function() {
+  describe('attribute updates', function () {
+    it('uses an updated connection URL after forced reprocessing', async function () {
       const owner = createProcessedHTML(`
         <div hx-signalr:connect="/one">
           <div id="subscription" hx-signalr:subscribe="echo">Original</div>
@@ -1136,7 +1191,7 @@ describe('hx-signalr extension', function() {
       const previousConnection = mockHubConnections[0]
 
       owner.setAttribute('hx-signalr:connect', '/two')
-      htmx.process(owner)
+      htmx.process(owner, true)
       owner.querySelector('button').click()
       await wait()
 
@@ -1150,7 +1205,7 @@ describe('hx-signalr extension', function() {
       assert.equal(owner.querySelector('#subscription').textContent, 'Updated')
     })
 
-    it('uses an updated send method on the next trigger', async function() {
+    it('uses an updated send method on the next trigger', async function () {
       const owner = createProcessedHTML(`
         <div hx-signalr:connect="/test-hub">
           <button hx-signalr:send="draft">Send</button>
@@ -1165,7 +1220,7 @@ describe('hx-signalr extension', function() {
       assert.equal(mockHubConnections[0].sentMessages[0].method, 'publish')
     })
 
-    it('replaces subscription methods after reprocessing', async function() {
+    it('replaces subscription methods after forced reprocessing', async function () {
       const owner = createProcessedHTML(`
         <div hx-signalr:connect="/test-hub">
           <div id="subscription" hx-signalr:subscribe="echo">Original</div>
@@ -1174,7 +1229,7 @@ describe('hx-signalr extension', function() {
       const subscription = owner.querySelector('#subscription')
 
       subscription.setAttribute('hx-signalr:subscribe', 'counter')
-      htmx.process(subscription)
+      htmx.process(subscription, true)
 
       await mockHubConnections[0].emit('echo', '<p>Old method</p>')
       assert.equal(subscription.textContent, 'Original')
@@ -1183,7 +1238,7 @@ describe('hx-signalr extension', function() {
       assert.equal(subscription.textContent, 'New method')
     })
 
-    it('unregisters a removed subscription after reprocessing', async function() {
+    it('unregisters a removed subscription after forced reprocessing', async function () {
       const owner = createProcessedHTML(`
         <div hx-signalr:connect="/test-hub">
           <div id="subscription" hx-signalr:subscribe="echo">Original</div>
@@ -1192,14 +1247,14 @@ describe('hx-signalr extension', function() {
       const subscription = owner.querySelector('#subscription')
 
       subscription.removeAttribute('hx-signalr:subscribe')
-      htmx.process(subscription)
+      htmx.process(subscription, true)
 
       await mockHubConnections[0].emit('echo', '<p>Ignored</p>')
 
       assert.equal(subscription.textContent, 'Original')
     })
 
-    it('stops a connection whose attribute is removed and reprocessed', function() {
+    it('stops a connection whose attribute is removed and forcibly reprocessed', function () {
       const owner = createProcessedHTML(`
         <div hx-signalr:connect="/test-hub">
           <div hx-signalr:subscribe="echo"></div>
@@ -1207,14 +1262,14 @@ describe('hx-signalr extension', function() {
       `)
 
       owner.removeAttribute('hx-signalr:connect')
-      htmx.process(owner)
+      htmx.process(owner, true)
 
       assert.equal(mockHubConnections[0].stopCalls, 1)
     })
   })
 
-  describe('outgoing messages', function() {
-    it('emits hx-ws-style outgoing events and waits for asynchronous work', async function() {
+  describe('outgoing messages', function () {
+    it('emits hx-ws-style outgoing events and waits for asynchronous work', async function () {
       const owner = createProcessedHTML(`
         <div hx-signalr:connect="/test-hub">
           <button hx-signalr:send="draft" name="kind" value="note">Send</button>
@@ -1246,7 +1301,7 @@ describe('hx-signalr extension', function() {
       assert.isTrue(afterDetail.message.data === sent.message)
     })
 
-    it('allows outgoing listeners to replace the SignalR argument', async function() {
+    it('allows outgoing listeners to replace the SignalR argument', async function () {
       const owner = createProcessedHTML(`
         <div hx-signalr:connect="/test-hub">
           <button hx-signalr:send="save" name="ignored" value="ignored">Send</button>
@@ -1262,7 +1317,7 @@ describe('hx-signalr extension', function() {
       assert.deepEqual(mockHubConnections[0].sentMessages[0].message, { custom: true })
     })
 
-    it('allows outgoing message listeners to cancel sending', async function() {
+    it('allows outgoing message listeners to cancel sending', async function () {
       const owner = createProcessedHTML(`
         <div hx-signalr:connect="/test-hub">
           <button hx-signalr:send="save">Send</button>
@@ -1278,7 +1333,7 @@ describe('hx-signalr extension', function() {
       assert.lengthOf(mockHubConnections[0].sentMessages, 0)
     })
 
-    it('serializes outgoing message processing and sends', async function() {
+    it('serializes outgoing message processing and sends', async function () {
       const owner = createProcessedHTML(`
         <div hx-signalr:connect="/test-hub">
           <button hx-signalr:send="save" name="sequence" value="first">Send</button>
@@ -1289,7 +1344,7 @@ describe('hx-signalr extension', function() {
       const order = []
       let releaseFirst
       const firstPending = new Promise(resolve => { releaseFirst = resolve })
-      connection.send = function(method, message) {
+      connection.send = function (method, message) {
         this.sentMessages.push({ method, message })
         return message.sequence === 'first' ? firstPending : Promise.resolve()
       }
@@ -1315,7 +1370,7 @@ describe('hx-signalr extension', function() {
       assert.deepEqual(order, ['before:first', 'after:first', 'before:second', 'after:second'])
     })
 
-    it('serializes a send triggered from an outgoing message listener', async function() {
+    it('serializes a send triggered from an outgoing message listener', async function () {
       const owner = createProcessedHTML(`
         <div hx-signalr:connect="/test-hub">
           <button id="first" hx-signalr:send="first">First</button>
@@ -1342,7 +1397,7 @@ describe('hx-signalr extension', function() {
       assert.deepEqual(mockHubConnections[0].sentMessages.map(send => send.method), ['first', 'second'])
     })
 
-    it('flushes a message queued while an empty flush is completing', async function() {
+    it('flushes a message queued while an empty flush is completing', async function () {
       playground().innerHTML = `
         <div hx-signalr:connect="/test-hub">
           <button hx-signalr:send="save">Send</button>
@@ -1360,7 +1415,8 @@ describe('hx-signalr extension', function() {
       assert.lengthOf(mockHubConnections[0].sentMessages, 1)
     })
 
-    it('queues outgoing messages during reconnect and flushes them in order', async function() {
+    it('queues outgoing messages during reconnect and flushes them in order', async function () {
+      suppressConsoleError()
       const owner = createProcessedHTML(`
         <div hx-signalr:connect="/test-hub">
           <button hx-signalr:send="save" name="sequence" value="first">Send</button>
@@ -1388,7 +1444,8 @@ describe('hx-signalr extension', function() {
       assert.equal(afterCount, 2)
     })
 
-    it('reports an error when the reconnect queue is full', async function() {
+    it('reports an error when the reconnect queue is full', async function () {
+      suppressConsoleError()
       htmx.config.signalr.maxOutgoingMessagesQueueSize = 1
       const owner = createProcessedHTML(`
         <div hx-signalr:connect="/test-hub">
@@ -1399,29 +1456,24 @@ describe('hx-signalr extension', function() {
       const connection = mockHubConnections[0]
       const button = owner.querySelector('button')
       const errors = []
-      const originalConsoleError = console.error
-      console.error = function() {}
       button.addEventListener('htmx:signalr:error', event => { errors.push(event.detail.error) })
 
-      try {
-        connection.reconnecting(new Error('temporary'))
-        button.click()
-        button.value = 'second'
-        button.click()
-        await wait()
+      connection.reconnecting(new Error('temporary'))
+      button.click()
+      button.value = 'second'
+      button.click()
+      await wait()
 
-        assert.deepEqual(errors, ['Outgoing messages queue is full'])
+      assert.deepEqual(errors, ['Outgoing messages queue is full'])
 
-        connection.reconnected('new-id')
-        await wait()
+      connection.reconnected('new-id')
+      await wait()
 
-        assert.deepEqual(connection.sentMessages.map(send => send.message.sequence), ['first'])
-      } finally {
-        console.error = originalConsoleError
-      }
+      assert.deepEqual(connection.sentMessages.map(send => send.message.sequence), ['first'])
     })
 
-    it('discards queued messages when the connection closes', async function() {
+    it('discards queued messages when the connection closes', async function () {
+      suppressConsoleError()
       const owner = createProcessedHTML(`
         <div hx-signalr:connect="/test-hub">
           <button hx-signalr:send="save">Send</button>
@@ -1442,7 +1494,7 @@ describe('hx-signalr extension', function() {
       assert.lengthOf(connection.sentMessages, 0)
     })
 
-    it('sends form values and htmx headers on submit', async function() {
+    it('sends form values and htmx headers on submit', async function () {
       const owner = createProcessedHTML(`
         <div hx-signalr:connect="/test-hub">
           <form id="sender" hx-signalr:send="echo">
@@ -1463,7 +1515,7 @@ describe('hx-signalr extension', function() {
       assert.equal(mockHubConnections[0].sentMessages[0].message.headers['HX-Current-URL'], location.href)
     })
 
-    it('coalesces repeated form fields into an array', async function() {
+    it('coalesces repeated form fields into an array', async function () {
       const owner = createProcessedHTML(`
         <div hx-signalr:connect="/test-hub">
           <form hx-signalr:send="save">
@@ -1479,7 +1531,7 @@ describe('hx-signalr extension', function() {
       assert.deepEqual(mockHubConnections[0].sentMessages[0].message.tag, ['one', 'two'])
     })
 
-    it('uses click as the default trigger for buttons', async function() {
+    it('uses click as the default trigger for buttons', async function () {
       const owner = createProcessedHTML(`
         <div hx-signalr:connect="/test-hub">
           <button hx-signalr:send="save" name="action" value="publish">Publish</button>
@@ -1497,7 +1549,7 @@ describe('hx-signalr extension', function() {
       assert.equal(mockHubConnections[0].sentMessages[0].message.action, 'publish')
     })
 
-    it('uses change as the default trigger for inputs', async function() {
+    it('uses change as the default trigger for inputs', async function () {
       const owner = createProcessedHTML(`
         <div hx-signalr:connect="/test-hub">
           <form><input hx-signalr:send="update" name="status" value="ready"></form>
@@ -1512,7 +1564,7 @@ describe('hx-signalr extension', function() {
       assert.equal(mockHubConnections[0].sentMessages[0].message.status, 'ready')
     })
 
-    it('respects a custom hx-trigger', async function() {
+    it('respects a custom hx-trigger', async function () {
       const owner = createProcessedHTML(`
         <div hx-signalr:connect="/test-hub">
           <button hx-signalr:send="refresh" hx-trigger="refresh">Refresh</button>
@@ -1529,7 +1581,7 @@ describe('hx-signalr extension', function() {
       assert.equal(mockHubConnections[0].sentMessages[0].method, 'refresh')
     })
 
-    it('respects delay and once trigger modifiers', async function() {
+    it('respects delay and once trigger modifiers', async function () {
       const owner = createProcessedHTML(`
         <div hx-signalr:connect="/test-hub">
           <button hx-signalr:send="save" hx-trigger="click delay:20ms once">Save</button>
@@ -1547,7 +1599,7 @@ describe('hx-signalr extension', function() {
       assert.lengthOf(mockHubConnections[0].sentMessages, 1)
     })
 
-    it('includes hx-vals in the outgoing message', async function() {
+    it('includes hx-vals in the outgoing message', async function () {
       const owner = createProcessedHTML(`
         <div hx-signalr:connect="/test-hub">
           <button hx-signalr:send="save" hx-vals='{"count":42,"active":true}'>Save</button>
@@ -1562,7 +1614,7 @@ describe('hx-signalr extension', function() {
       assert.strictEqual(message.active, true)
     })
 
-    it('includes values selected with hx-include', async function() {
+    it('includes values selected with hx-include', async function () {
       const owner = createProcessedHTML(`
         <div hx-signalr:connect="/test-hub">
           <input id="included" name="extra" value="included">
@@ -1576,7 +1628,7 @@ describe('hx-signalr extension', function() {
       assert.equal(mockHubConnections[0].sentMessages[0].message.extra, 'included')
     })
 
-    it('includes HX-Target when hx-target is set', async function() {
+    it('includes HX-Target when hx-target is set', async function () {
       const owner = createProcessedHTML(`
         <div hx-signalr:connect="/test-hub">
           <button hx-signalr:send="save" hx-target="#result">Save</button>
@@ -1590,7 +1642,7 @@ describe('hx-signalr extension', function() {
       assert.equal(mockHubConnections[0].sentMessages[0].message.headers['HX-Target'], 'div#result')
     })
 
-    it('uses the nearest ancestor SignalR connection', async function() {
+    it('uses the nearest ancestor SignalR connection', async function () {
       const page = createProcessedHTML(`
         <main hx-signalr:connect="/outer">
           <section hx-signalr:connect="/inner">
@@ -1606,7 +1658,7 @@ describe('hx-signalr extension', function() {
       assert.lengthOf(mockHubConnections[1].sentMessages, 1)
     })
 
-    it('keeps sends isolated between separate connection owners', async function() {
+    it('keeps sends isolated between separate connection owners', async function () {
       const page = createProcessedHTML(`
         <main>
           <section hx-signalr:connect="/one"><button hx-signalr:send="first">One</button></section>
@@ -1623,7 +1675,8 @@ describe('hx-signalr extension', function() {
       assert.deepEqual(mockHubConnections[1].sentMessages.map(send => send.method), ['second'])
     })
 
-    it('reports a send element with no SignalR connection context', async function() {
+    it('reports a send element with no SignalR connection context', async function () {
+      suppressConsoleError()
       playground().innerHTML = '<button hx-signalr:send="save">Save</button>'
       const button = playground().firstElementChild
       let error
@@ -1633,14 +1686,8 @@ describe('hx-signalr extension', function() {
       })
 
       htmx.process(playground())
-      const originalConsoleError = console.error
-      console.error = function() {}
-      try {
-        button.click()
-        await wait()
-      } finally {
-        console.error = originalConsoleError
-      }
+      button.click()
+      await wait()
 
       assert.lengthOf(mockHubConnections, 0)
       assert.equal(error, 'No SignalR connection found for element')

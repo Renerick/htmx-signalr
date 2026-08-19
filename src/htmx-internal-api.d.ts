@@ -1,6 +1,6 @@
 import type { HtmxEventMap, HtmxRequestCtx } from 'htmx.org';
 
-export type HtmxHconObject = Record<string, unknown>;
+export type HtmxHconObject = {};
 
 export interface HtmxHcon {
     parse<T extends HtmxHconObject = HtmxHconObject>(source: string): T;
@@ -132,4 +132,49 @@ export interface HtmxInternalApi {
         isAsync?: boolean,
         compile?: boolean,
     ): T | Promise<T> | (() => T | Promise<T>);
+}
+
+export interface HtmxExtension {
+    init(internalApi: HtmxInternalApi): void;
+
+    htmx_before_init?(elt: Element, detail: HtmxEventMap['htmx:before:init']): void;
+    htmx_after_init?(elt: Element, detail: HtmxEventMap['htmx:after:init']): void;
+    htmx_before_process?(elt: Element, detail: HtmxEventMap['htmx:before:process']): void;
+    htmx_after_process?(elt: Element, detail: HtmxEventMap['htmx:after:process']): void;
+    htmx_before_cleanup?(elt: Element, detail: HtmxEventMap['htmx:before:cleanup']): void;
+    htmx_after_cleanup?(elt: Element, detail: HtmxEventMap['htmx:after:cleanup']): void;
+
+    htmx_config_request?(elt: Element, detail: HtmxEventMap['htmx:config:request']): void;
+    htmx_before_request?(elt: Element, detail: HtmxEventMap['htmx:before:request']): void;
+    htmx_before_response?(elt: Element, detail: HtmxEventMap['htmx:before:response']): void;
+    htmx_after_request?(elt: Element, detail: HtmxEventMap['htmx:after:request']): void;
+    htmx_finally_request?(elt: Element, detail: HtmxEventMap['htmx:finally:request']): void;
+
+    htmx_error?(elt: Element, detail: HtmxEventMap['htmx:error']): void;
+
+    htmx_before_swap?(elt: Element, detail: HtmxEventMap['htmx:before:swap']): void;
+    htmx_after_swap?(elt: Element, detail: HtmxEventMap['htmx:after:swap']): void;
+    htmx_finally_swap?(elt: Element, detail: HtmxEventMap['htmx:finally:swap']): void;
+    htmx_before_settle?(elt: Element, detail: HtmxEventMap['htmx:before:settle']): void;
+    htmx_after_settle?(elt: Element, detail: HtmxEventMap['htmx:after:settle']): void;
+
+    handle_swap?(swapStyle: string, target: Element, fragment: Element, swapSpec: HtmxSwapSpec): void;
+
+    htmx_before_history_update?(elt: Element, detail: HtmxEventMap['htmx:before:history:update']): void;
+    htmx_after_history_update?(elt: Element, detail: HtmxEventMap['htmx:after:history:update']): void;
+    htmx_after_history_push?(elt: Element, detail: HtmxEventMap['htmx:after:history:push']): void;
+    htmx_after_history_replace?(elt: Element, detail: HtmxEventMap['htmx:after:history:replace']): void;
+    htmx_before_history_restore?(elt: Element, detail: HtmxEventMap['htmx:before:history:restore']): void;
+}
+
+declare module 'htmx.org' {
+    export interface Htmx {
+        registerExtension(name: string, ext: HtmxExtension): void;
+    }
+}
+
+declare global {
+    interface Element {
+        _htmx?: HtmxElementData
+    }
 }
