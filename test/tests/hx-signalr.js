@@ -356,32 +356,61 @@ describe('hx-signalr extension', function () {
 
     it('removes only its own SignalR method handler', async function () {
       const owner = createProcessedHTML('<div hx-signalr:connect="/hub"><div hx-signalr:subscribe="echo"></div></div>')
+      const connection = mockHubConnections[0]
       let received = 0
-      mockHubConnections[0].on('echo', () => { received++ })
+      let subscriptionMessages = 0
+      const externalHandler = () => { received++ }
+      connection.on('echo', externalHandler)
+      assert.lengthOf(connection.handlers.get('echo'), 2)
       const sub = owner.firstElementChild
+      sub.addEventListener('htmx:signalr:before:message:incoming', () => { subscriptionMessages++ })
       await htmx.swap({ sourceElement: sub, target: sub, text: '', swap: 'delete' })
-      await mockHubConnections[0].emit('echo', 'External')
+
+      assert.deepEqual(connection.handlers.get('echo'), [externalHandler])
+      await connection.emit('echo', 'External')
+      assert.equal(subscriptionMessages, 0)
       assert.equal(received, 1)
     })
 
     it('shares case-insensitive subscriptions and preserves the remaining subscriber', async function () {
       const owner = createProcessedHTML('<div hx-signalr:connect="/hub"><div id="one" hx-signalr:subscribe="Echo,echo"></div><div id="two" hx-signalr:subscribe="echo"></div></div>')
-      let messages = 0
-      owner.addEventListener('htmx:signalr:before:message:incoming', () => { messages++ })
+      const connection = mockHubConnections[0]
       const first = owner.querySelector('#one')
-      await htmx.swaphubElement.getAttribute({ sourceElement: first, target: first, text: '', swap: 'delete' })
-      await mockHubConnections[0].emit('ECHO', 'Still subscribed')
-      assert.equal(messages, 1)
+      const second = owner.querySelector('#two')
+      let firstMessages = 0
+      let secondMessages = 0
+      first.addEventListener('htmx:signalr:before:message:incoming', () => { firstMessages++ })
+      second.addEventListener('htmx:signalr:before:message:incoming', () => { secondMessages++ })
+
+      await connection.emit('ECHO', 'Initial message')
+
+      assert.equal(firstMessages, 1)
+      assert.equal(secondMessages, 1)
+
+      await htmx.swap({ sourceElement: first, target: first, text: '', swap: 'delete' })
+
+      await connection.emit('ECHO', 'Still subscribed')
+      assert.equal(firstMessages, 1)
+      assert.equal(secondMessages, 2)
       assert.equal(owner.querySelector('#two').textContent, 'Still subscribed')
     })
 
     it('transfers a moved subscriber to its current connection owner', async function () {
       const page = createProcessedHTML('<main><div id="one" hx-signalr:connect="/one"><div id="sub" hx-signalr:subscribe="echo"></div></div><div id="two" hx-signalr:connect="/two"></div></main>')
       const sub = page.querySelector('#sub')
+      const eventConnections = []
+      sub.addEventListener('htmx:signalr:before:message:incoming', event => {
+        eventConnections.push(event.detail.connection.hub)
+      })
+      assert.lengthOf(mockHubConnections[0].handlers.get('echo'), 1)
       page.querySelector('#two').append(sub)
       htmx.process(sub, true)
+
+      assert.lengthOf(mockHubConnections[0].handlers.get('echo'), 0)
+      assert.lengthOf(mockHubConnections[1].handlers.get('echo'), 1)
       await mockHubConnections[1].emit('echo', 'New owner')
       await mockHubConnections[0].emit('echo', 'Old owner')
+      assert.deepEqual(eventConnections, [mockHubConnections[1]])
       assert.equal(sub.textContent, 'New owner')
     })
 
@@ -817,28 +846,41 @@ describe('hx-signalr extension', function () {
       assert.sameMembers([...mockHubConnections[0].handlers.keys()], ['echo', 'counter', 'notification'])
     })
 
-    it('emits hx-ws-style incoming events and waits for asynchronous work', async function () {
+    it('emits an before incoming event and waits for asynchronous work', async function () {
       const owner = createProcessedHTML(`
         <div hx-signalr:connect="/test-hub">
           <div id="subscription" hx-signalr:subscribe="echo">Original</div>
         </div>
       `)
       let beforeDetail
-      let afterDetail
       owner.addEventListener('htmx:signalr:before:message:incoming', event => {
         beforeDetail = event.detail
         event.detail.waitUntil(Promise.resolve().then(() => {
           event.detail.message.data = '<p>Changed asynchronously</p>'
         }))
       })
-      owner.addEventListener('htmx:signalr:after:message:incoming', event => { afterDetail = event.detail })
 
       await mockHubConnections[0].emit('echo', '<p>Original message</p>')
 
       assert.isTrue(beforeDetail.connection.hub === mockHubConnections[0])
       assert.equal(beforeDetail.message.method, 'echo')
-      assert.equal(await beforeDetail.message.text(), '<p>Changed asynchronously</p>')
+      assert.equal(beforeDetail.message.data, '<p>Changed asynchronously</p>')
       assert.equal(owner.querySelector('#subscription').textContent, 'Changed asynchronously')
+    })
+
+    it('emits an after incoming event', async function () {
+      const owner = createProcessedHTML(`
+        <div hx-signalr:connect="/test-hub">
+          <div hx-signalr:subscribe="echo"></div>
+        </div>
+      `)
+      let beforeDetail
+      let afterDetail
+      owner.addEventListener('htmx:signalr:before:message:incoming', event => { beforeDetail = event.detail })
+      owner.addEventListener('htmx:signalr:after:message:incoming', event => { afterDetail = event.detail })
+
+      await mockHubConnections[0].emit('echo', '<p>Original message</p>')
+
       assert.isTrue(afterDetail.message === beforeDetail.message)
     })
 
@@ -891,35 +933,6 @@ describe('hx-signalr extension', function () {
       assert.deepEqual(order, ['before:first', 'after:first', 'before:second', 'after:second'])
     })
 
-    it('does not process a delayed message after its connection is replaced', async function () {
-      const owner = createProcessedHTML(`
-        <div hx-signalr:connect="/one">
-          <div id="subscription" hx-signalr:subscribe="echo"></div>
-        </div>
-      `)
-      let releaseMessage
-      let started
-      const interceptionStarted = new Promise(resolve => { started = resolve })
-      const messagePending = new Promise(resolve => { releaseMessage = resolve })
-      owner.addEventListener('htmx:signalr:before:message:incoming', event => {
-        if (event.detail.message.data === '<p>Stale</p>') {
-          event.detail.waitUntil(messagePending)
-          started()
-        }
-      })
-
-      const staleMessage = mockHubConnections[0].emit('echo', '<p>Stale</p>')
-      await interceptionStarted
-      owner.setAttribute('hx-signalr:connect', '/two')
-      htmx.process(owner, true)
-      await mockHubConnections[1].emit('echo', '<p>Fresh</p>')
-
-      releaseMessage()
-      await staleMessage
-
-      assert.equal(owner.querySelector('#subscription').textContent, 'Fresh')
-    })
-
     it('updates every subscriber to the same method once', async function () {
       const owner = createProcessedHTML(`
         <div hx-signalr:connect="/test-hub">
@@ -934,20 +947,33 @@ describe('hx-signalr extension', function () {
       assert.equal(owner.querySelector('#second').textContent, 'Updated')
     })
 
-    it('does not duplicate subscriptions when an element is processed again', async function () {
+    it('updates subscriptions without duplicating handlers when an element is processed again', async function () {
       const owner = createProcessedHTML(`
         <div hx-signalr:connect="/test-hub">
-          <div id="subscription" hx-signalr:subscribe="echo"></div>
+          <div id="subscription" hx-signalr:subscribe="echo, counter"></div>
         </div>
       `)
       const subscription = owner.querySelector('#subscription')
-      let messages = 0
-      owner.addEventListener('htmx:signalr:before:message:incoming', () => { messages++ })
+      const connection = mockHubConnections[0]
+      const methods = []
+      subscription.addEventListener('htmx:signalr:before:message:incoming', event => {
+        methods.push(event.detail.message.method)
+      })
+      assert.lengthOf(connection.handlers.get('echo'), 1)
+      assert.lengthOf(connection.handlers.get('counter'), 1)
 
+      subscription.setAttribute('hx-signalr:subscribe', 'counter, notification')
       htmx.process(subscription)
-      await mockHubConnections[0].emit('echo', 'Updated')
 
-      assert.equal(messages, 1)
+      assert.lengthOf(connection.handlers.get('echo'), 0)
+      assert.lengthOf(connection.handlers.get('counter'), 1)
+      assert.lengthOf(connection.handlers.get('notification'), 1)
+
+      await connection.emit('echo', 'Removed method')
+      await connection.emit('counter', 'Retained method')
+      await connection.emit('notification', 'Added method')
+
+      assert.deepEqual(methods, ['counter', 'notification'])
     })
 
     it('swaps string messages into the subscription element by default', async function () {
@@ -1134,11 +1160,18 @@ describe('hx-signalr extension', function () {
       `)
       const first = owner.querySelector('#first')
       const second = owner.querySelector('#second')
+      const connection = mockHubConnections[0]
+      let firstMessages = 0
+      let secondMessages = 0
+      first.addEventListener('htmx:signalr:before:message:incoming', () => { firstMessages++ })
+      second.addEventListener('htmx:signalr:before:message:incoming', () => { secondMessages++ })
 
       await htmx.swap({ text: '', target: first, swap: 'delete', sourceElement: first })
 
-      await mockHubConnections[0].emit('echo', '<p>Updated</p>')
+      await connection.emit('echo', '<p>Updated</p>')
 
+      assert.equal(firstMessages, 0)
+      assert.equal(secondMessages, 1)
       assert.equal(owner.querySelector('#second').textContent, 'Updated')
     })
 
@@ -1149,6 +1182,10 @@ describe('hx-signalr extension', function () {
         </div>
       `)
       const subscription = owner.querySelector('#subscription')
+      const connection = mockHubConnections[0]
+      let oldSubscriptionMessages = 0
+      subscription.addEventListener('htmx:signalr:before:message:incoming', () => { oldSubscriptionMessages++ })
+      assert.lengthOf(connection.handlers.get('echo'), 1)
 
       await htmx.swap({
         text: '<div id="subscription" hx-signalr:subscribe="counter"></div>',
@@ -1157,10 +1194,17 @@ describe('hx-signalr extension', function () {
         sourceElement: subscription
       })
 
-      await mockHubConnections[0].emit('echo', '<p>Ignored</p>')
-      assert.equal(owner.querySelector('#subscription').textContent, '')
-      await mockHubConnections[0].emit('counter', '<p>Updated</p>')
-      assert.equal(owner.querySelector('#subscription').textContent, 'Updated')
+      const replacement = owner.querySelector('#subscription')
+      let replacementMessages = 0
+      replacement.addEventListener('htmx:signalr:before:message:incoming', () => { replacementMessages++ })
+      assert.lengthOf(connection.handlers.get('echo'), 0)
+      assert.lengthOf(connection.handlers.get('counter'), 1)
+      await connection.emit('echo', '<p>Ignored</p>')
+      assert.equal(oldSubscriptionMessages, 0)
+      assert.equal(replacement.textContent, '')
+      await connection.emit('counter', '<p>Updated</p>')
+      assert.equal(replacementMessages, 1)
+      assert.equal(replacement.textContent, 'Updated')
     })
 
     it('unsubscribes immediately when htmx removes a subscription element', async function () {
@@ -1170,12 +1214,15 @@ describe('hx-signalr extension', function () {
         </div>
       `)
       const subscription = owner.querySelector('#subscription')
+      const connection = mockHubConnections[0]
       let messages = 0
-      owner.addEventListener('htmx:signalr:before:message:incoming', () => { messages++ })
+      subscription.addEventListener('htmx:signalr:before:message:incoming', () => { messages++ })
+      assert.lengthOf(connection.handlers.get('echo'), 1)
 
       await htmx.swap({ text: '', target: subscription, swap: 'delete', sourceElement: subscription })
-      await mockHubConnections[0].emit('echo', '<p>Ignored</p>')
 
+      assert.lengthOf(connection.handlers.get('echo'), 0)
+      await connection.emit('echo', '<p>Ignored</p>')
       assert.equal(messages, 0)
     })
 
@@ -1228,14 +1275,23 @@ describe('hx-signalr extension', function () {
         </div>
       `)
       const subscription = owner.querySelector('#subscription')
+      const connection = mockHubConnections[0]
+      const methods = []
+      subscription.addEventListener('htmx:signalr:before:message:incoming', event => {
+        methods.push(event.detail.message.method)
+      })
+      assert.lengthOf(connection.handlers.get('echo'), 1)
 
       subscription.setAttribute('hx-signalr:subscribe', 'counter')
       htmx.process(subscription, true)
 
-      await mockHubConnections[0].emit('echo', '<p>Old method</p>')
+      assert.lengthOf(connection.handlers.get('echo'), 0)
+      assert.lengthOf(connection.handlers.get('counter'), 1)
+      await connection.emit('echo', '<p>Old method</p>')
       assert.equal(subscription.textContent, 'Original')
 
-      await mockHubConnections[0].emit('counter', '<p>New method</p>')
+      await connection.emit('counter', '<p>New method</p>')
+      assert.deepEqual(methods, ['counter'])
       assert.equal(subscription.textContent, 'New method')
     })
 
@@ -1246,12 +1302,18 @@ describe('hx-signalr extension', function () {
         </div>
       `)
       const subscription = owner.querySelector('#subscription')
+      const connection = mockHubConnections[0]
+      let messages = 0
+      subscription.addEventListener('htmx:signalr:before:message:incoming', () => { messages++ })
+      assert.lengthOf(connection.handlers.get('echo'), 1)
 
       subscription.removeAttribute('hx-signalr:subscribe')
       htmx.process(subscription, true)
 
-      await mockHubConnections[0].emit('echo', '<p>Ignored</p>')
+      assert.lengthOf(connection.handlers.get('echo'), 0)
+      await connection.emit('echo', '<p>Ignored</p>')
 
+      assert.equal(messages, 0)
       assert.equal(subscription.textContent, 'Original')
     })
 

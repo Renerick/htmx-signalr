@@ -1,4 +1,4 @@
-import type { HtmxConfig } from 'htmx.org';
+import type { HtmxConfig, HtmxSwapContext } from 'htmx.org';
 import type { HtmxInternalApi, HtmxExtension } from './htmx-internal-api';
 import { HubConnection } from '@microsoft/signalr';
 import { HtmxSignalRConfig } from './htmx-config';
@@ -12,7 +12,16 @@ type ConnectionDetails = {
     config: HtmxSignalRConfig
 }
 
+type IncomingMessage = {
+    content: string,
+    swap: string,
+    target: string,
+    select: string
+}
+
 declare interface IConnectController {
+    subscribe(m: string, handleMessage: (m: any) => Promise<unknown>): void;
+    unsubscribe(m: string, handleMessage: (m: any) => Promise<unknown>): void;
     outboxIsFull(): boolean;
     serialized(work: (ConnectController: any) => Promise<void>): Promise<void>;
     buildConnectionDetails(): ConnectionDetails;
@@ -21,12 +30,16 @@ declare interface IConnectController {
     stop(reason: string): void;
 };
 
+declare interface ISubscribeController {
+    start(): void;
+    stop(): void
+};
+
 declare module './htmx-internal-api' {
     interface HtmxElementData {
         signalr?: {
             connect?: IConnectController
-            // @ts-ignore
-            subscribe?: SubscribeController
+            subscribe?: ISubscribeController
 
             sendInitialized?: boolean
         }
@@ -103,40 +116,39 @@ declare module './htmx-internal-api' {
             this.queue = Promise.resolve();
             this.sendOutbox = [];
         }
-
         serialized(work: (ConnectController: any) => Promise<void>) {
             this.queue = this.queue.then(() => work(this)).catch(() => { });
             return this.queue;
         }
 
         start() {
-            let connectionEvent = {
+            let connectionDetails = {
                 url: this.url,
                 hub: null as HubConnection | null,
                 config: this.config,
                 cancelled: false
             }
 
-            if (!api.triggerHtmxEvent(this.ownerElement, 'htmx:signalr:before:connection', { connection: connectionEvent })
-                || connectionEvent.cancelled) {
+            if (!api.triggerHtmxEvent(this.ownerElement, 'htmx:signalr:before:connection', { connection: connectionDetails })
+                || connectionDetails.cancelled) {
 
                 api.triggerHtmxEvent(this.ownerElement, 'htmx:signalr:close', {
-                    connection: connectionEvent,
+                    connection: connectionDetails,
                     reason: 'cancelled'
                 })
                 return Promise.resolve();
             }
 
-            this.url = connectionEvent.url;
-            this.config = connectionEvent.config;
+            this.url = connectionDetails.url;
+            this.config = connectionDetails.config;
 
             this.hubConnection = this.createHub();
             this.connectHubEvents();
 
-            connectionEvent.hub = this.hubConnection;
+            connectionDetails.hub = this.hubConnection;
 
             return this.hubConnection.start().then(() => {
-                api.triggerHtmxEvent(this.ownerElement, 'htmx:signalr:after:connection', { connection: connectionEvent })
+                api.triggerHtmxEvent(this.ownerElement, 'htmx:signalr:after:connection', { connection: connectionDetails })
                 this.flushSendQueue();
             });
         }
@@ -145,6 +157,15 @@ declare module './htmx-internal-api' {
             this.stopReason = reason;
             return this.hubConnection?.stop();
         }
+
+        subscribe(m: string, handleMessage: (m: string, d: string | IncomingMessage) => Promise<void>): void {
+            this.hubConnection?.on(m, handleMessage);
+        }
+
+        unsubscribe(m: string, handleMessage: (m: any) => Promise<unknown>): void {
+            this.hubConnection?.off(m, handleMessage);
+        }
+
 
         private isReady() {
             return this.hubConnection
@@ -291,8 +312,8 @@ declare module './htmx-internal-api' {
 
             let trigger = api.attributeValue(elt, 'hx-trigger') ?? 'load';
 
-            api.onTrigger(elt, trigger, (e) => {
-                // @ts-ignore
+            api.onTrigger(elt, trigger, () => {
+                // @ts-ignore I'm too lazy to add window.signalR declaration to types
                 if (!window.signalR) {
                     let error = new Error("SignalR object not found. Include SignalR script in the page scripts before this extenion.");
                     api.triggerHtmxEvent(elt, "htmx:signalr:error", { error })
@@ -307,13 +328,10 @@ declare module './htmx-internal-api' {
         }
 
         static cleanUpIfNeeded(elt: Element) {
-            if (!elt._htmx?.signalr?.connect) {
-                return;
+            if (elt._htmx?.signalr?.connect) {
+                elt._htmx.signalr.connect.stop('removed');
+                delete elt._htmx.signalr.connect;
             }
-
-            let controller = elt._htmx.signalr.connect;
-            controller.stop('removed');
-            delete elt._htmx.signalr.connect;
         }
 
         static findParent(elt: Element | null) {
@@ -324,6 +342,150 @@ declare module './htmx-internal-api' {
             return elt?._htmx?.signalr?.connect;
         }
     };
+
+    class SubscribeController implements ISubscribeController {
+        private ownerElement: Element;
+        private connectController: IConnectController | null;
+        private handlers: Map<string, (d: string | IncomingMessage) => Promise<unknown>>;
+
+        private queue: Promise<unknown>;
+
+        constructor(ownerElement: Element) {
+            this.ownerElement = ownerElement;
+            this.connectController = null;
+            this.handlers = new Map();
+
+            this.queue = Promise.resolve();
+        }
+
+        private serialized(p: () => Promise<unknown>) {
+            this.queue = this.queue.then(p).catch(() => { });
+            return this.queue;
+        }
+
+        private async handleIncomingMessage(method: string, data: string | IncomingMessage) {
+            let ctx: HtmxSwapContext;
+
+            let awaitables: Promise<unknown>[] = [];
+            let incomingDetails = {
+                message: {
+                    method: method,
+                    data: data
+                },
+                connection: this.connectController!.buildConnectionDetails(),
+                cancelled: false,
+                waitUntil: (promise: Promise<unknown>) => { awaitables.push(promise); }
+            };
+
+            return this.serialized(async () => {
+                if (!api.triggerHtmxEvent(this.ownerElement, 'htmx:signalr:before:message:incoming', incomingDetails)) {
+                    return;
+                }
+
+                if (incomingDetails.cancelled) {
+                    return;
+                }
+
+                await Promise.all(awaitables);
+
+                let selectOob = api.attributeValue(this.ownerElement, 'hx-select-oob');
+
+                if (typeof incomingDetails.message.data === 'string') {
+                    ctx = {
+                        text: incomingDetails.message.data,
+                        // @ts-ignore: bug in htmx typings
+                        target: api.attributeValue(this.ownerElement, 'hx-target') ?? this.ownerElement,
+                        swap: api.attributeValue(this.ownerElement, 'hx-swap'),
+                        select: api.attributeValue(this.ownerElement, 'hx-select'),
+                        selectOOB: selectOob,
+                        sourceElement: this.ownerElement,
+                        transition: false
+                    };
+                } else {
+                    ctx = {
+                        text: incomingDetails.message.data.content,
+                        // @ts-ignore: bug in htmx typings
+                        target: incomingDetails.message.data.target ?? api.attributeValue(this.ownerElement, 'hx-target') ?? this.ownerElement,
+                        swap: incomingDetails.message.data.swap ?? api.attributeValue(this.ownerElement, 'hx-swap'),
+                        select: incomingDetails.message.data.select ?? api.attributeValue(this.ownerElement, 'hx-select'),
+                        selectOOB: selectOob,
+                        sourceElement: this.ownerElement,
+                        transition: false
+                    };
+                }
+
+
+                htmx.swap(ctx);
+                api.triggerHtmxEvent(this.ownerElement, 'htmx:signalr:after:message:incoming', {
+                    message: incomingDetails.message,
+                    conneciton: incomingDetails.connection
+                });
+            });
+        }
+
+        start(): void {
+            if (!this.connectController) {
+                let connectController = ConnectController.findParent(this.ownerElement);
+                if (!connectController) {
+                    let error = new Error('No connect controller found in parent elements');
+                    api.triggerHtmxEvent(this.ownerElement, "htmx:signalr:error", { error })
+                    return;
+                } else {
+                    this.connectController = connectController;
+                }
+            }
+            let connectController = this.connectController;
+
+            let currentMethods = new Set(api.attributeValue(this.ownerElement, ATTR.SUBSCRIBE)?.split(',').map(s => s.trim()));
+            let existingMethods = new Set(this.handlers.keys());
+
+            let toSubscribe = currentMethods.difference(existingMethods);
+            let toUnsubscribe = existingMethods.difference(currentMethods);
+
+            toSubscribe.forEach(m => {
+                let handler = (d: string | IncomingMessage) => this.handleIncomingMessage(m, d);
+                this.handlers.set(m, handler);
+                connectController.subscribe(m, handler);
+            })
+            toUnsubscribe.forEach(m => {
+                let handler = this.handlers.get(m);
+                if (handler) {
+                    connectController.unsubscribe(m, handler);
+                }
+            })
+        }
+
+        stop(): void {
+            this.handlers.forEach((h, m) => {
+                this.connectController?.unsubscribe(m, h);
+            })
+        }
+
+        static attachIfNeeded(elt: Element) {
+            if (elt._htmx?.signalr?.subscribe) {
+                elt._htmx.signalr.subscribe.start();
+                return elt._htmx.signalr.subscribe;
+            }
+
+            if (!api.attributeValue(elt, ATTR.SUBSCRIBE)) {
+                return undefined;
+            }
+
+            let controller = new SubscribeController(elt);
+
+            let prop = api.htmxProp(elt);
+            prop.signalr ??= {};
+            prop.signalr.subscribe = controller;
+
+            controller.start();
+        }
+        static cleanUpIfNeeded(elt: Element) {
+            if (elt._htmx?.signalr?.subscribe) {
+                elt._htmx.signalr.subscribe.stop();
+                delete elt._htmx.signalr.subscribe;
+            }
+        }
+    }
 
     async function sendCollectMessage(elt: Element, event: Event) {
         let method = api.attributeValue(elt, ATTR.SEND);
@@ -357,7 +519,7 @@ declare module './htmx-internal-api' {
         return message;
     }
 
-    function sendAttachIfNeeded(elt: Element) {
+    function attachSendingIfNeeded(elt: Element) {
         if (elt._htmx?.signalr?.sendInitialized) {
             return;
         }
@@ -453,10 +615,10 @@ declare module './htmx-internal-api' {
             ConnectController.attachIfNeeded(elt);
         }
         if (elt.matches(SELECTOR.SEND)) {
-            sendAttachIfNeeded(elt);
+            attachSendingIfNeeded(elt);
         }
         if (elt.matches(SELECTOR.SUBSCRIBE) && api.attributeValue(elt, ATTR.SUBSCRIBE)) {
-            // console.log('process', elt, 'as subscribe')
+            SubscribeController.attachIfNeeded(elt);
         }
     }
 
@@ -474,6 +636,7 @@ declare module './htmx-internal-api' {
 
         htmx_before_cleanup: (elt) => {
             ConnectController.cleanUpIfNeeded(elt);
+            SubscribeController.cleanUpIfNeeded(elt);
         }
     } satisfies HtmxExtension)
 })();
