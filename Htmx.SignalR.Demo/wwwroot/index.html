@@ -2,47 +2,134 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport"
-          content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
-    <meta http-equiv="X-UA-Compatible" content="ie=edge">
-    <title>Test page</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>htmx SignalR demo</title>
     <style>
-    .htmx-settling {
-        background: pink;
-    }
+        :root {
+            color-scheme: light dark;
+            font-family: system-ui, sans-serif;
+        }
+
+        body {
+            margin: 0 auto;
+            max-width: 64rem;
+            padding: 2rem;
+        }
+
+        .examples {
+            display: grid;
+            gap: 1rem;
+            grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
+        }
+
+        article, .messages {
+            border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+            border-radius: .5rem;
+            padding: 1rem;
+        }
+
+        form {
+            display: flex;
+            gap: .5rem;
+        }
+
+        input {
+            min-width: 0;
+            flex: 1;
+        }
+
+        .messages {
+            min-height: 5rem;
+            margin-top: 1rem;
+        }
+
+        .message {
+            margin: .25rem 0;
+            padding: .5rem;
+            background: color-mix(in srgb, Highlight 15%, transparent);
+            border-radius: .25rem;
+        }
+
+        .htmx-settling {
+            outline: 2px solid Highlight;
+        }
+
+        #signalr-indicator {
+            padding: .75rem;
+            background: color-mix(in srgb, orange 25%, transparent);
+            border-radius: .5rem;
+        }
     </style>
 </head>
 <body>
-<div id="signalr-indicator" style="display: none;">Connecting to the hub...</div>
-<div hx-ext="signalr,client-side-templates" signalr-connect="/testhub"
-     hx-on:htmx:signalr:reconnecting="htmx.find('#signalr-indicator').style.display='block'"
-     hx-on:htmx:signalr:reconnected="htmx.find('#signalr-indicator').style.display='none'">
-    <div signalr-subscribe="counter">
-        <div id="counter"></div>
+<main>
+    <h1>htmx + SignalR</h1>
+    <p>This page demonstrates raw HTML and JSON messages over one SignalR connection.</p>
+
+    <p id="signalr-indicator">Connecting to the hub...</p>
+
+    <div hx-signalr:connect="/testhub"
+        hx-on:htmx:signalr:before:connection="htmx.find('#signalr-indicator').hidden = false"
+        hx-on:htmx:signalr:after:connection="htmx.find('#signalr-indicator').hidden = true">
+        <div class="examples">
+            <article>
+                <h2>Raw HTML</h2>
+                <p>
+                    The subscriber chooses the target and appends the server's HTML.
+                    The response also updates the status out of band.
+                </p>
+
+                <form data-hx-signalr:send="Echo">
+                    <input name="message" value="A raw message" aria-label="Raw message">
+                    <button type="submit">Send</button>
+                </form>
+
+                <div hx-signalr:subscribe="echo" hx-target="#raw-messages" hx-swap="beforeend"></div>
+
+                <div id="raw-messages" class="messages" aria-live="polite"></div>
+                <p id="raw-status">No raw messages yet.</p>
+            </article>
+
+            <article>
+                <h2>Structured message</h2>
+                <p>
+                    The server response supplies <code>content</code>, <code>target</code>, <code>swap</code>,
+                    and <code>select</code>.
+                </p>
+
+                <form hx-signalr:send="StructuredEcho">
+                    <input name="message" value="A structured message" aria-label="Structured message">
+                    <button type="submit">Send</button>
+                </form>
+
+                <div hx-signalr:subscribe="structuredEcho"></div>
+                <div id="structured-messages" class="messages" aria-live="polite"></div>
+            </article>
+
+            <article>
+                <h2>Server push</h2>
+                <p>A hosted service broadcasts raw HTML every two seconds.</p>
+                <div class="messages">
+                    Current value:
+                    <span hx-signalr:subscribe="counter">Waiting...</span>
+                </div>
+            </article>
+        </div>
     </div>
-    <form signalr-send="echo">
-        <input type="text" name="message">
-        <button type="submit">Submit</button>
-    </form>
-    <div signalr-subscribe="echo" hx-target="#echo-target" hx-swap="beforeend">
-    </div>
-    <h2>Echo target is below</h2>
-    <div id="echo-target"></div>
-    <h2>Echo oob data is below</h2>
-    <div id="echo-oob-data"></div>
-    <hr>
-    <h2>Transform response test (Mustache client side tempaltes)</h2>
-    <div mustache-template="foo" signalr-subscribe="json">
-    </div>
-    <template id="foo">
-        <div id="json">{{name}} - {{id}}</div>
-    </template>
-</div>
-<script src="https://cdn.jsdelivr.net/gh/bigskysoftware/htmx@2.0.0/src/htmx.js"></script>
-<script src="https://unpkg.com/@microsoft/signalr@8.0.0/dist/browser/signalr.js"></script>
-<script src="/hx-signalr.js"></script>
-<script src="https://unpkg.com/htmx.org/dist/ext/client-side-templates.js"></script>
-<script src="https://unpkg.com/mustache@latest"></script>
-<script src="https://unpkg.com/hyperscript.org@0.9.7"></script>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/htmx.org@4.0.0/dist/htmx.js"
+    integrity="sha384-ESzWv77gBOAGtF3d7B8QiQ786cghRRsyhuYVVJGsrFGxwT0Dj1fLxReX9Ul6t4n9"
+    crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@microsoft/signalr@10.0.11/dist/browser/signalr.js"></script>
+<script>
+    htmx.config.logAll = true;
+    htmx.config.signalr = {
+        logging: signalR.LogLevel.Information,
+        automaticReconnect: [0, 2_000, 10_000, 30_000],
+        maxOutgoingMessagesQueueSize: 100
+    }
+</script>
+<script src="/extension/hx-signalr.js"></script>
 </body>
 </html>

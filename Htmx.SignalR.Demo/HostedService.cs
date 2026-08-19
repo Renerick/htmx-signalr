@@ -17,15 +17,10 @@ public class HostedService : BackgroundService
         {
             await _hubContext.Clients.All.SendAsync(
                 "counter",
-                $@"<div id=""counter"">{new Random().Next()}</div>",
+                $"<strong>{Random.Shared.Next(1, 10_000):N0}</strong>",
                 cancellationToken: cancellationToken
             );
-            await _hubContext.Clients.All.SendAsync(
-                "json",
-                new { name = "test", id = new Random().Next() },
-                cancellationToken: cancellationToken
-            );
-            await Task.Delay(5000, cancellationToken);
+            await Task.Delay(2000, cancellationToken);
         }
     }
 }
